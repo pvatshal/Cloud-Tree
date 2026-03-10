@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: cloudtree-mongo
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - cloudtree-net
+
+  server:
+    build: ./server
+    container_name: cloudtree-server
+    restart: unless-stopped
+    environment:
+      PORT: 8000
+      MONGO_URI: mongodb://mongo:27017/cloudtree
+      JWT_SECRET: ${JWT_SECRET}
+      EMAIL_USER: ${EMAIL_USER}
+      EMAIL_PASS: ${EMAIL_PASS}
+    depends_on:
+      - mongo
+    networks:
+      - cloudtree-net
+
+  client:
+    build: ./client
+    container_name: cloudtree-client
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - server
+    networks:
+      - cloudtree-net
+
+volumes:
+  mongo_data:
+
+networks:
+  cloudtree-net:
+    driver: bridge
