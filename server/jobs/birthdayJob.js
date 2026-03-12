@@ -1,16 +1,22 @@
 import cron from 'node-cron';
-import nodemailer from 'nodemailer';
+import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 import Member from '../models/Member.js';
 import dotenv from 'dotenv';
 dotenv.config();
 
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  }
-});
+const ses = new SESClient({ region: process.env.S3_REGION || 'us-east-2' });
+
+const sendEmail = async (to, subject, body) => {
+  const command = new SendEmailCommand({
+    Source: process.env.EMAIL_USER,
+    Destination: { ToAddresses: [to] },
+    Message: {
+      Subject: { Data: subject },
+      Body: { Text: { Data: body } },
+    },
+  });
+  await ses.send(command);
+};
 
 // Runs every day at 8:00 AM
 cron.schedule('0 8 * * *', async () => {
@@ -21,18 +27,17 @@ cron.schedule('0 8 * * *', async () => {
   try {
     const members = await Member.find({ email: { $exists: true, $ne: '' } });
 
-    members.forEach(member => {
+    for (const member of members) {
       // Birthday check
       if (member.dob) {
         const dob = new Date(member.dob);
         if (dob.getMonth() + 1 === month && dob.getDate() === day) {
-          transporter.sendMail({
-            from: process.env.EMAIL_USER,
-            to: member.email,
-            subject: `🎂 Happy Birthday ${member.name}!`,
-            text: `Wishing ${member.name} a very Happy Birthday from CloudTree! 🌳`
-          });
-          console.log(`Birthday email sent to ${member.name}`);
+          await sendEmail(
+            member.email,
+            `🎂 Happy Birthday ${member.name}!`,
+            `Wishing ${member.name} a very Happy Birthday from CloudTree! 🌳`
+          );
+          console.log(`✅ Birthday email sent to ${member.name}`);
         }
       }
 
@@ -40,17 +45,16 @@ cron.schedule('0 8 * * *', async () => {
       if (member.anniversary) {
         const ann = new Date(member.anniversary);
         if (ann.getMonth() + 1 === month && ann.getDate() === day) {
-          transporter.sendMail({
-            from: process.env.EMAIL_USER,
-            to: member.email,
-            subject: `💍 Happy Anniversary ${member.name}!`,
-            text: `Wishing ${member.name} a wonderful Anniversary from CloudTree! 🌳`
-          });
-          console.log(`Anniversary email sent to ${member.name}`);
+          await sendEmail(
+            member.email,
+            `💍 Happy Anniversary ${member.name}!`,
+            `Wishing ${member.name} a wonderful Anniversary from CloudTree! 🌳`
+          );
+          console.log(`✅ Anniversary email sent to ${member.name}`);
         }
       }
-    });
+    }
   } catch (err) {
-    console.error('Cron job error:', err);
+    console.error('❌ Cron job error:', err);
   }
 });

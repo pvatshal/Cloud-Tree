@@ -22,6 +22,7 @@ services:
       EMAIL_PASS: ${EMAIL_PASS}
       S3_BUCKET: ${S3_BUCKET}
       S3_REGION: ${S3_REGION}
+      SES_REGION: ${SES_REGION}
     depends_on:
       - mongo
     networks:
