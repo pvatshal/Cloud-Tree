@@ -7,6 +7,7 @@ import EditMemberModal from '../components/EditMemberModal';
 import { useTheme } from '../context/ThemeContext';
 import { toPng } from 'html-to-image';
 import StatsPanel from './StatsPanel';
+import { useReactFlow } from '@xyflow/react';
 
 
 export default function Dashboard() {
@@ -33,17 +34,29 @@ const [showStats, setShowStats] = useState(false);
     refetch();
   };
 
-  const handleExport = async () => {
-  const el = document.querySelector('.react-flow');
-  if (!el) return;
+ const handleExport = async () => {
+  const el = document.querySelector('.react-flow__viewport');
+  if (!el) return alert('Open tree view to export');
   try {
-    const dataUrl = await toPng(el, { quality: 1, pixelRatio: 2 });
+    const { toPng } = await import('html-to-image');
+    const dataUrl = await toPng(el, {
+      quality: 1,
+      pixelRatio: 2,
+      backgroundColor: dark ? '#0d1f13' : '#f0fdf4',
+      filter: (node) => {
+        // Skip problematic elements
+        if (node.classList?.contains('react-flow__minimap')) return false;
+        if (node.classList?.contains('react-flow__controls')) return false;
+        return true;
+      }
+    });
     const link = document.createElement('a');
-    link.download = 'cloudtree-family.png';
+    link.download = `cloudtree-${Date.now()}.png`;
     link.href = dataUrl;
     link.click();
   } catch (err) {
     console.error('Export failed:', err);
+    alert('Export failed — try zooming out first');
   }
 };
 
@@ -60,126 +73,100 @@ const [showStats, setShowStats] = useState(false);
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg)', transition: 'background 0.3s ease' }}>
 
       {/* Navbar */}
-      <nav style={{
-        display: 'flex', alignItems: 'center', padding: '0 1.5rem',
-        height: '64px', background: 'var(--bg-nav)',
-        backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
-        borderBottom: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)',
-        zIndex: 10, gap: '1rem', position: 'sticky', top: 0,
-      }}>
-        {/* Logo */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <span style={{ fontSize: '1.4rem' }}>🌿</span>
-          <span style={{ fontFamily: 'Playfair Display, serif', fontSize: '1.3rem', color: 'var(--forest)', fontWeight: 700 }}>CloudTree</span>
-        </div>
+     {/* Navbar */}
+<nav className="navbar" style={{
+  display: 'flex', alignItems: 'center', padding: '0 1.5rem',
+  height: '64px', background: 'var(--bg-nav)',
+  backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
+  borderBottom: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)',
+  zIndex: 10, gap: '1rem', position: 'sticky', top: 0,
+}}>
+  {/* Logo */}
+  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
+    <span style={{ fontSize: '1.4rem' }}>🌿</span>
+    <span style={{ fontFamily: 'Playfair Display, serif', fontSize: '1.3rem', color: 'var(--forest)', fontWeight: 700 }}>CloudTree</span>
+  </div>
 
-        {/* Search bar */}
-        <div style={{ flex: 1, maxWidth: '360px', position: 'relative' }}>
-          <span style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', fontSize: '0.9rem', pointerEvents: 'none' }}>🔍</span>
-          <input
-            style={{
-              width: '100%', padding: '0.5rem 0.75rem 0.5rem 2.2rem',
-              borderRadius: '10px', border: '1.5px solid var(--border)',
-              background: 'var(--bg-input)', fontSize: '0.88rem',
-              color: 'var(--text-dark)', fontFamily: 'DM Sans, sans-serif',
-              outline: 'none', transition: 'border 0.2s',
-            }}
-            placeholder="Search members..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
-          {search && (
-            <button
-              onClick={() => setSearch('')}
-              style={{ position: 'absolute', right: '0.5rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-soft)', fontSize: '0.9rem' }}
-            >✕</button>
-          )}
-        </div>
+  {/* Search bar */}
+  <div className="navbar-search" style={{ flex: 1, maxWidth: '360px', position: 'relative' }}>
+    <span style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', fontSize: '0.9rem', pointerEvents: 'none' }}>🔍</span>
+    <input
+      style={{ width: '100%', padding: '0.5rem 0.75rem 0.5rem 2.2rem', borderRadius: '10px', border: '1.5px solid var(--border)', background: 'var(--bg-input)', fontSize: '0.88rem', color: 'var(--text-dark)', fontFamily: 'DM Sans, sans-serif', outline: 'none', boxSizing: 'border-box' }}
+      placeholder="Search members..."
+      value={search}
+      onChange={e => setSearch(e.target.value)}
+    />
+    {search && (
+      <button onClick={() => setSearch('')} style={{ position: 'absolute', right: '0.5rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-soft)', fontSize: '0.9rem' }}>✕</button>
+    )}
+  </div>
 
-        {/* Gender filter */}
-        <select
-          value={filterGender}
-          onChange={e => setFilterGender(e.target.value)}
-          style={{
-            padding: '0.5rem 0.75rem', borderRadius: '10px',
-            border: '1.5px solid var(--border)', background: 'var(--bg-input)',
-            fontSize: '0.85rem', color: 'var(--text-dark)',
-            fontFamily: 'DM Sans, sans-serif', cursor: 'pointer', outline: 'none',
-          }}
-        >
-          <option value="all">👥 All</option>
-          <option value="male">👨 Male</option>
-          <option value="female">👩 Female</option>
-          <option value="other">🧑 Other</option>
-        </select>
+  {/* Gender filter */}
+  <select className="navbar-gender-filter"
+    value={filterGender}
+    onChange={e => setFilterGender(e.target.value)}
+    style={{ padding: '0.5rem 0.75rem', borderRadius: '10px', border: '1.5px solid var(--border)', background: 'var(--bg-input)', fontSize: '0.85rem', color: 'var(--text-dark)', fontFamily: 'DM Sans, sans-serif', cursor: 'pointer', outline: 'none', flexShrink: 0 }}
+  >
+    <option value="all">👥 All</option>
+    <option value="male">👨 Male</option>
+    <option value="female">👩 Female</option>
+    <option value="other">🧑 Other</option>
+  </select>
 
-        {/* View toggle */}
-        <div style={{ display: 'flex', background: 'var(--bg-input)', borderRadius: '10px', border: '1.5px solid var(--border)', overflow: 'hidden' }}>
-          {[['tree', '🌳'], ['list', '📋']].map(([mode, icon]) => (
-            <button key={mode} onClick={() => setViewMode(mode)} style={{
-              padding: '0.5rem 0.75rem', border: 'none', cursor: 'pointer',
-              background: viewMode === mode ? 'var(--forest-light)' : 'transparent',
-              color: viewMode === mode ? 'white' : 'var(--text-soft)',
-              fontSize: '0.9rem', transition: 'background 0.2s',
-              fontFamily: 'DM Sans, sans-serif',
-            }}>{icon}</button>
-          ))}
-        </div>
+  {/* View toggle */}
+  <div style={{ display: 'flex', background: 'var(--bg-input)', borderRadius: '10px', border: '1.5px solid var(--border)', overflow: 'hidden', flexShrink: 0 }}>
+    {[['tree', '🌳'], ['list', '📋']].map(([mode, icon]) => (
+      <button key={mode} onClick={() => setViewMode(mode)} style={{ padding: '0.5rem 0.75rem', border: 'none', cursor: 'pointer', background: viewMode === mode ? 'var(--forest-light)' : 'transparent', color: viewMode === mode ? 'white' : 'var(--text-soft)', fontSize: '0.9rem', transition: 'background 0.2s', fontFamily: 'DM Sans, sans-serif' }}>{icon}</button>
+    ))}
+  </div>
 
-        {/* Stats chip */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', background: 'var(--sage-soft)', border: '1.5px solid var(--border)', borderRadius: '99px', padding: '0.3rem 0.9rem' }}>
-          <span style={{ fontSize: '0.85rem' }}>👥</span>
-          <span style={{ fontWeight: 700, color: 'var(--forest)', fontSize: '0.9rem' }}>
-            {search || filterGender !== 'all' ? `${filtered.length}/` : ''}{members.length}
-          </span>
-        </div>
+  {/* Stats chip */}
+  <div className="navbar-stats-chip" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', background: 'var(--sage-soft)', border: '1.5px solid var(--border)', borderRadius: '99px', padding: '0.3rem 0.9rem', flexShrink: 0 }}>
+    <span style={{ fontSize: '0.85rem' }}>👥</span>
+    <span style={{ fontWeight: 700, color: 'var(--forest)', fontSize: '0.9rem' }}>
+      {search || filterGender !== 'all' ? `${filtered.length}/` : ''}{members.length}
+    </span>
+  </div>
 
-        {/* Right actions */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', background: 'var(--sage-soft)', border: '1.5px solid var(--border)', borderRadius: '99px', padding: '0.25rem 0.75rem 0.25rem 0.25rem' }}>
-            <div style={{ width: '26px', height: '26px', borderRadius: '50%', background: 'var(--btn-grad)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700 }}>
-              {user.name?.[0]?.toUpperCase() || '?'}
-            </div>
-            <span style={{ fontSize: '0.83rem', fontWeight: 600, color: 'var(--text-mid)' }}>{user.name}</span>
-          </div>
+  {/* Right actions */}
+  <div className="navbar-right" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginLeft: 'auto', flexShrink: 0 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', background: 'var(--sage-soft)', border: '1.5px solid var(--border)', borderRadius: '99px', padding: '0.25rem 0.75rem 0.25rem 0.25rem' }}>
+      <div style={{ width: '26px', height: '26px', borderRadius: '50%', background: 'var(--btn-grad)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700 }}>
+        {user.name?.[0]?.toUpperCase() || '?'}
+      </div>
+      <span className="navbar-username" style={{ fontSize: '0.83rem', fontWeight: 600, color: 'var(--text-mid)' }}>{user.name}</span>
+    </div>
 
-          <button onClick={toggle} title={dark ? 'Light mode' : 'Dark mode'}
-            style={{ width: '36px', height: '36px', borderRadius: '10px', border: '1.5px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', fontSize: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'transform 0.2s' }}
-            onMouseEnter={e => e.currentTarget.style.transform = 'rotate(20deg) scale(1.1)'}
-            onMouseLeave={e => e.currentTarget.style.transform = 'none'}
-          >{dark ? '☀️' : '🌙'}</button>
+    <button onClick={toggle} title={dark ? 'Light mode' : 'Dark mode'}
+      style={{ width: '36px', height: '36px', borderRadius: '10px', border: '1.5px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', fontSize: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      onMouseEnter={e => e.currentTarget.style.transform = 'rotate(20deg) scale(1.1)'}
+      onMouseLeave={e => e.currentTarget.style.transform = 'none'}
+    >{dark ? '☀️' : '🌙'}</button>
 
-<button
-  onClick={() => setShowStats(true)}
-  style={{ width: '36px', height: '36px', borderRadius: '10px', border: '1.5px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', fontSize: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-soft)' }}
-  title="Family Stats"
->📊</button>
+    <button onClick={() => setShowStats(true)} title="Family Stats"
+      style={{ width: '36px', height: '36px', borderRadius: '10px', border: '1.5px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', fontSize: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+    >📊</button>
 
-{/* Export button */}
-{viewMode === 'tree' && members.length > 0 && (
-  <button
-    onClick={handleExport}
-    style={{ width: '36px', height: '36px', borderRadius: '10px', border: '1.5px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', fontSize: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-soft)' }}
-    title="Export as PNG"
-  >🖼️</button>
-)}
+    {viewMode === 'tree' && members.length > 0 && (
+      <button onClick={handleExport} title="Export as PNG"
+        style={{ width: '36px', height: '36px', borderRadius: '10px', border: '1.5px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', fontSize: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      >🖼️</button>
+    )}
 
+    <button className="btn-primary" onClick={() => setShowAddModal(true)}
+      style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.5rem 1.1rem', background: 'var(--btn-grad)', color: 'white', border: 'none', borderRadius: '10px', fontSize: '0.88rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', boxShadow: 'var(--btn-shadow)', flexShrink: 0 }}>
+      <span style={{ fontSize: '1rem' }}>+</span>
+      <span className="navbar-username">Add Member</span>
+      <span className="navbar-username" style={{ display: 'none' }}></span>
+    </button>
 
-
-
-
-          <button className="btn-primary" onClick={() => setShowAddModal(true)}
-            style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.5rem 1.1rem', background: 'var(--btn-grad)', color: 'white', border: 'none', borderRadius: '10px', fontSize: '0.88rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', boxShadow: 'var(--btn-shadow)' }}>
-            <span style={{ fontSize: '1rem' }}>+</span> Add Member
-          </button>
-
-          <button onClick={handleLogout}
-            style={{ width: '36px', height: '36px', borderRadius: '10px', border: '1.5px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', fontSize: '0.85rem', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-soft)' }}
-            onMouseEnter={e => { e.currentTarget.style.background = '#fee2e2'; e.currentTarget.style.borderColor = '#fca5a5'; }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'var(--bg-card)'; e.currentTarget.style.borderColor = 'var(--border)'; }}
-          >⎋</button>
-        </div>
-      </nav>
+    <button onClick={handleLogout}
+      style={{ width: '36px', height: '36px', borderRadius: '10px', border: '1.5px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', fontSize: '0.85rem', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-soft)' }}
+      onMouseEnter={e => { e.currentTarget.style.background = '#fee2e2'; e.currentTarget.style.borderColor = '#fca5a5'; }}
+      onMouseLeave={e => { e.currentTarget.style.background = 'var(--bg-card)'; e.currentTarget.style.borderColor = 'var(--border)'; }}
+    >⎋</button>
+  </div>
+</nav>
 
       {/* Main Content */}
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
@@ -238,7 +225,7 @@ function ListView({ members, onEdit, onDelete }) {
 
   return (
     <div style={{ padding: '1.5rem', overflowY: 'auto', height: '100%' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1rem', maxWidth: '1200px', margin: '0 auto' }}>
+<div className="list-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1rem', maxWidth: '1200px', margin: '0 auto' }}>
         {members.map((m, i) => {
           const cfg = GENDER_COLORS[m.gender] || GENDER_COLORS.other;
           return (

@@ -90,7 +90,7 @@ export default function StatsPanel({ members, onClose }) {
         <div style={{ padding: '1.5rem 1.75rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
 
           {/* Main stats grid */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem' }}>
+<div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem' }}>
             <StatCard icon="👥" label="Total Members" value={stats.total} color="#16a34a" />
             <StatCard icon="🌿" label="Generations" value={stats.generations} color="#0ea5e9" />
             <StatCard icon="💍" label="Married" value={stats.married / 2 | 0} color="#f59e0b" />

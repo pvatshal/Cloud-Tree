@@ -171,62 +171,54 @@ input:focus, select:focus, textarea:focus {
 .react-flow__minimap { border-radius: 12px; overflow: hidden; border: 1.5px solid var(--border); }
 .react-flow__controls { border-radius: 12px; overflow: hidden; box-shadow: var(--shadow-md) !important; border: 1.5px solid var(--border); }
 .react-flow__controls-button { background: var(--bg-card) !important; border-color: var(--border) !important; color: var(--text-mid) !important; }
-
 /* ── Mobile Responsive ───────────────────────── */
 @media (max-width: 768px) {
-  /* Navbar — stack on mobile */
-  nav {
-    flex-wrap: wrap;
+  .navbar {
+    flex-wrap: wrap !important;
     height: auto !important;
-    padding: 0.75rem 1rem !important;
-    gap: 0.5rem !important;
+    padding: 0.6rem 0.75rem !important;
+    gap: 0.4rem !important;
   }
 
-  /* Hide search on mobile — show as full width below */
-  nav > div:nth-child(2) {
+  .navbar-search {
     order: 10;
-    flex: 0 0 100%;
+    flex: 0 0 100% !important;
     max-width: 100% !important;
   }
 
-  /* Hide gender filter text */
-  nav select { font-size: 0.8rem !important; }
+  .navbar-right {
+    gap: 0.35rem !important;
+  }
 
-  /* Smaller logo */
-  nav span[style*="Playfair"] { font-size: 1.1rem !important; }
+  .navbar-username {
+    display: none !important;
+  }
 
-  /* Member cards in list view — single column */
-  div[style*="repeat(auto-fill"] {
+  .navbar-gender-filter {
+    display: none !important;
+  }
+
+  .list-grid {
     grid-template-columns: 1fr !important;
   }
 
-  /* Stats grid — 2 columns on mobile */
-  div[style*="repeat(3, 1fr)"] {
+  .stats-grid {
     grid-template-columns: repeat(2, 1fr) !important;
   }
 
-  /* Modal — full screen on mobile */
-  div[style*="maxWidth: '520px'"],
-  div[style*="maxWidth: '480px'"],
-  div[style*="maxWidth: '600px'"] {
+  .modal-inner {
     max-width: 100% !important;
     border-radius: 16px !important;
     margin: 0.5rem !important;
   }
 
-  /* Login/Register — single column on mobile */
-  div[style*="width: '45%'"] {
+  .auth-banner {
     display: none !important;
-  }
-
-  div[style*="formSide"] {
-    padding: 1rem !important;
   }
 }
 
 @media (max-width: 480px) {
-  /* Hide user name on very small screens */
-  span[style*="fontSize: '0.83rem'"] {
-    display: none !important;
+  .navbar-stats-chip span:last-child {
+    display: none;
   }
 }
