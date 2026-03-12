@@ -20,6 +20,8 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       EMAIL_USER: ${EMAIL_USER}
       EMAIL_PASS: ${EMAIL_PASS}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_REGION: ${S3_REGION}
     depends_on:
       - mongo
     networks:
