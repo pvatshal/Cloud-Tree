@@ -215,6 +215,17 @@ input:focus, select:focus, textarea:focus {
   .auth-banner {
     display: none !important;
   }
+
+  /* Auth pages */
+  .auth-banner {
+    display: none !important;
+  }
+
+  /* Form takes full width */
+  .auth-banner + div {
+    flex: 1 !important;
+    padding: 1.5rem !important;
+  }
 }
 
 @media (max-width: 480px) {
@@ -222,3 +233,4 @@ input:focus, select:focus, textarea:focus {
     display: none;
   }
 }
+

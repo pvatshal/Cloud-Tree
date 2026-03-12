@@ -25,7 +25,7 @@ export default function Register() {
 
   return (
     <div style={s.page}>
-      <div style={s.panel}>
+      <div className="auth-banner" style={s.panel}>
         <div style={s.panelInner}>
           <div style={s.treeIllustration}>🌱</div>
           <h1 style={s.panelTitle}>Start your family tree today.</h1>
@@ -90,17 +90,14 @@ export default function Register() {
 
 const s = {
   page: { display: 'flex', height: '100vh', width: '100vw', overflow: 'hidden' },
-  panel: {
-    width: '45%', background: 'linear-gradient(160deg, #1a4731 0%, #166534 50%, #15803d 100%)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '3rem',
-  },
+  panel: { width: '45%', background: 'linear-gradient(160deg, #1a4731 0%, #166534 50%, #15803d 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '3rem' },
   panelInner: { color: 'white', maxWidth: '380px' },
   treeIllustration: { fontSize: '5rem', display: 'block', marginBottom: '1.5rem' },
   panelTitle: { fontFamily: 'Playfair Display, serif', fontSize: '2.2rem', lineHeight: 1.2, marginBottom: '1rem', fontWeight: 700 },
   panelSub: { fontSize: '1rem', opacity: 0.8, lineHeight: 1.6, marginBottom: '2rem' },
   features: { display: 'flex', flexDirection: 'column', gap: '0.75rem' },
   feature: { display: 'flex', gap: '0.75rem', alignItems: 'center', background: 'rgba(255,255,255,0.1)', borderRadius: '10px', padding: '0.6rem 1rem', fontSize: '0.9rem', backdropFilter: 'blur(4px)' },
-  formSide: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--cream)', padding: '2rem' },
+  formSide: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--cream)', padding: '2rem', overflowY: 'auto' },
   card: { width: '100%', maxWidth: '400px', background: 'white', borderRadius: '24px', padding: '2.5rem', boxShadow: '0 20px 60px rgba(26,71,49,0.12)' },
   logoRow: { display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '2rem' },
   logoIcon: { fontSize: '1.5rem' },

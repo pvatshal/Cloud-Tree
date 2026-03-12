@@ -25,8 +25,8 @@ export default function Login() {
 
   return (
     <div style={s.page}>
-      {/* Left decorative panel */}
-      <div style={s.panel}>
+      {/* Left decorative panel — hidden on mobile via CSS */}
+      <div className="auth-banner" style={s.panel}>
         <div style={s.panelInner}>
           <div style={s.treeIllustration}>🌳</div>
           <h1 style={s.panelTitle}>Your family story,<br/>beautifully preserved.</h1>
@@ -41,6 +41,12 @@ export default function Login() {
 
       {/* Right form panel */}
       <div style={s.formSide}>
+        {/* Mobile-only logo */}
+        <div className="auth-mobile-logo" style={{ display: 'none', alignItems: 'center', gap: '0.5rem', marginBottom: '1.5rem' }}>
+          <span style={{ fontSize: '2rem' }}>🌿</span>
+          <span style={{ fontFamily: 'Playfair Display, serif', fontSize: '1.6rem', color: 'var(--forest)', fontWeight: 700 }}>CloudTree</span>
+        </div>
+
         <div style={s.card} className="scale-in">
           <div style={s.logoRow}>
             <span style={s.logoIcon}>🌿</span>
@@ -92,8 +98,7 @@ const s = {
   panelSub: { fontSize: '1rem', opacity: 0.8, lineHeight: 1.6, marginBottom: '2rem' },
   dots: { display: 'flex', flexWrap: 'wrap', gap: '0.5rem' },
   dot: { background: 'rgba(255,255,255,0.15)', borderRadius: '99px', padding: '0.3rem 0.8rem', fontSize: '0.8rem', backdropFilter: 'blur(4px)' },
-
-  formSide: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--cream)', padding: '2rem' },
+  formSide: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--cream)', padding: '2rem', overflowY: 'auto' },
   card: { width: '100%', maxWidth: '400px', background: 'white', borderRadius: '24px', padding: '2.5rem', boxShadow: '0 20px 60px rgba(26,71,49,0.12)' },
   logoRow: { display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '2rem' },
   logoIcon: { fontSize: '1.5rem' },
@@ -103,19 +108,8 @@ const s = {
   errorBox: { background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', padding: '0.75rem 1rem', color: '#dc2626', fontSize: '0.9rem', marginBottom: '1rem' },
   fieldGroup: { display: 'flex', flexDirection: 'column', gap: '0.4rem', marginBottom: '1rem' },
   label: { fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-mid)' },
-  input: {
-    padding: '0.85rem 1rem', borderRadius: '12px', border: '2px solid #e8f5e0',
-    fontSize: '0.95rem', outline: 'none', transition: 'border 0.2s',
-    background: 'var(--sage-soft)', fontFamily: 'DM Sans, sans-serif',
-  },
-  btn: {
-    width: '100%', padding: '0.95rem', background: 'linear-gradient(135deg, #16a34a, #166534)',
-    color: 'white', border: 'none', borderRadius: '12px', fontSize: '1rem',
-    fontWeight: 600, cursor: 'pointer', marginTop: '0.5rem', marginBottom: '1.5rem',
-    fontFamily: 'DM Sans, sans-serif', letterSpacing: '0.01em',
-    boxShadow: '0 4px 20px rgba(22,163,74,0.35)',
-    transition: 'transform 0.15s, box-shadow 0.15s',
-  },
+  input: { padding: '0.85rem 1rem', borderRadius: '12px', border: '2px solid #e8f5e0', fontSize: '0.95rem', outline: 'none', transition: 'border 0.2s', background: 'var(--sage-soft)', fontFamily: 'DM Sans, sans-serif' },
+  btn: { width: '100%', padding: '0.95rem', background: 'linear-gradient(135deg, #16a34a, #166534)', color: 'white', border: 'none', borderRadius: '12px', fontSize: '1rem', fontWeight: 600, cursor: 'pointer', marginTop: '0.5rem', marginBottom: '1.5rem', fontFamily: 'DM Sans, sans-serif', letterSpacing: '0.01em', boxShadow: '0 4px 20px rgba(22,163,74,0.35)', transition: 'transform 0.15s, box-shadow 0.15s' },
   switchText: { textAlign: 'center', color: 'var(--text-soft)', fontSize: '0.9rem' },
   link: { color: 'var(--forest-light)', fontWeight: 600, textDecoration: 'none' },
 };
