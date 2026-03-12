@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import API from '../api/axios';
 import { useTheme } from '../context/ThemeContext';
 
 export default function EditMemberModal({ member, onClose, onUpdated }) {
+  const { dark } = useTheme();
   const [form, setForm] = useState({
     name: member.name || '',
     gender: member.gender || 'male',
@@ -11,11 +12,32 @@ export default function EditMemberModal({ member, onClose, onUpdated }) {
     email: member.email || '',
     phone: member.phone || '',
     notes: member.notes || '',
+    photo: member.photo || '',
   });
-      const { dark } = useTheme();
-
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [preview, setPreview] = useState(member.photo || '');
+  const fileRef = useRef();
+
+  const handlePhotoChange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setPreview(URL.createObjectURL(file));
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('photo', file);
+      const { data } = await API.post('/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      setForm(f => ({ ...f, photo: data.url }));
+    } catch (err) {
+      setError('Photo upload failed');
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const handleSubmit = async () => {
     if (!form.name) return setError('Name is required');
@@ -43,6 +65,37 @@ export default function EditMemberModal({ member, onClose, onUpdated }) {
         </div>
 
         {error && <div style={s.errorBox}>{error}</div>}
+
+        {/* Photo Upload */}
+        <div style={{ padding: '1rem 1.75rem 0', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <div
+            onClick={() => fileRef.current.click()}
+            style={{
+              width: '72px', height: '72px', borderRadius: '50%',
+              background: preview ? 'transparent' : 'var(--sage)',
+              border: '2px dashed var(--border)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', overflow: 'hidden', flexShrink: 0,
+              transition: 'border 0.2s',
+            }}
+          >
+            {preview
+              ? <img src={preview} alt="preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              : <span style={{ fontSize: '1.5rem' }}>📸</span>
+            }
+          </div>
+          <div>
+            <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-dark)' }}>Profile Photo</div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-soft)', marginBottom: '0.4rem' }}>JPG, PNG up to 5MB</div>
+            <button
+              onClick={() => fileRef.current.click()}
+              style={{ fontSize: '0.8rem', padding: '0.3rem 0.8rem', borderRadius: '8px', border: '1.5px solid var(--border)', background: 'var(--bg-input)', cursor: 'pointer', color: 'var(--text-mid)', fontFamily: 'DM Sans, sans-serif' }}
+            >
+              {uploading ? '⏳ Uploading...' : '📁 Choose photo'}
+            </button>
+          </div>
+          <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handlePhotoChange} />
+        </div>
 
         <div style={s.section}>
           <div style={s.row}>
@@ -102,42 +155,19 @@ export default function EditMemberModal({ member, onClose, onUpdated }) {
 }
 
 const s = {
-overlay: {
-  position: 'fixed', inset: 0,
-  background: 'rgba(0,0,0,0.45)',
-  backdropFilter: 'blur(6px)',
-  WebkitBackdropFilter: 'blur(6px)',
-  display: 'flex', justifyContent: 'center',
-  alignItems: 'center', zIndex: 100, padding: '1rem'
-},
-modal: {
-  background: 'var(--bg-modal)',
-  borderRadius: '24px', width: '100%',
-  maxWidth: '520px', maxHeight: '90vh',
-  overflowY: 'auto',
-  boxShadow: 'var(--shadow-lg)',
-  border: '1px solid var(--border)',
-  fontFamily: 'DM Sans, sans-serif'
-},
-modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '1.75rem 1.75rem 0' },
+  overlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 100, padding: '1rem' },
+  modal: { background: 'var(--bg-modal)', borderRadius: '24px', width: '100%', maxWidth: '480px', maxHeight: '90vh', overflowY: 'auto', boxShadow: 'var(--shadow-lg)', border: '1px solid var(--border)', fontFamily: 'DM Sans, sans-serif' },
+  modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '1.75rem 1.75rem 0' },
   modalTitle: { fontFamily: 'Playfair Display, serif', fontSize: '1.5rem', color: 'var(--forest)', fontWeight: 700 },
   modalSub: { color: 'var(--text-soft)', fontSize: '0.85rem', marginTop: '0.2rem' },
-  closeBtn: { width: '32px', height: '32px', borderRadius: '8px', border: '1.5px solid #e8f5e0', background: 'var(--sage-soft)', cursor: 'pointer', fontSize: '0.85rem', color: 'var(--text-soft)', flexShrink: 0 },
+  closeBtn: { width: '32px', height: '32px', borderRadius: '8px', border: '1.5px solid var(--border)', background: 'var(--bg-input)', cursor: 'pointer', fontSize: '0.85rem', color: 'var(--text-soft)', flexShrink: 0 },
   errorBox: { margin: '1rem 1.75rem 0', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', padding: '0.75rem 1rem', color: '#dc2626', fontSize: '0.9rem' },
   section: { padding: '1.25rem 1.75rem' },
   row: { display: 'flex', gap: '0.75rem', marginBottom: '0.75rem' },
   field: { display: 'flex', flexDirection: 'column', gap: '0.35rem', flex: 1 },
   label: { fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-mid)' },
-  input: {
-  padding: '0.7rem 0.85rem', borderRadius: '10px',
-  border: '1.5px solid var(--border-input)',
-  fontSize: '0.9rem', outline: 'none',
-  background: 'var(--bg-input)',
-  fontFamily: 'DM Sans, sans-serif',
-  width: '100%', boxSizing: 'border-box',
-  color: 'var(--text-dark)',
-  transition: 'border 0.2s',
-}, actions: { display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', padding: '1.25rem 1.75rem', borderTop: '1px solid #f0fdf4' },
-  cancelBtn: { padding: '0.7rem 1.5rem', borderRadius: '10px', border: '1.5px solid #e8f5e0', cursor: 'pointer', background: 'white', fontFamily: 'DM Sans, sans-serif', fontWeight: 600, color: 'var(--text-mid)' },
-  submitBtn: { padding: '0.7rem 1.75rem', borderRadius: '10px', border: 'none', background: 'linear-gradient(135deg, #16a34a, #166534)', color: 'white', fontFamily: 'DM Sans, sans-serif', fontWeight: 600, cursor: 'pointer', boxShadow: '0 4px 16px rgba(22,163,74,0.3)' },
+  input: { padding: '0.7rem 0.85rem', borderRadius: '10px', border: '1.5px solid var(--border-input)', fontSize: '0.9rem', outline: 'none', background: 'var(--bg-input)', fontFamily: 'DM Sans, sans-serif', width: '100%', boxSizing: 'border-box', color: 'var(--text-dark)' },
+  actions: { display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', padding: '1.25rem 1.75rem', borderTop: '1px solid var(--border)' },
+  cancelBtn: { padding: '0.7rem 1.5rem', borderRadius: '10px', border: '1.5px solid var(--border)', cursor: 'pointer', background: 'var(--bg-modal)', fontFamily: 'DM Sans, sans-serif', fontWeight: 600, color: 'var(--text-mid)' },
+  submitBtn: { padding: '0.7rem 1.75rem', borderRadius: '10px', border: 'none', background: 'var(--btn-grad)', color: 'white', fontFamily: 'DM Sans, sans-serif', fontWeight: 600, cursor: 'pointer', boxShadow: 'var(--btn-shadow)' },
 };

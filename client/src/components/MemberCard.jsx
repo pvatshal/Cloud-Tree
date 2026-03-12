@@ -66,7 +66,18 @@ export default function MemberCard({ member, onEdit, onDelete }) {
         style={{ background: 'var(--amber)', width: 8, height: 8, border: '2px solid white' }} />
 
       {/* Initials Avatar */}
-      <div style={avatarStyle}>{initials}</div>
+<div style={avatarStyle}>
+  {member.photo ? (
+    <img
+      src={member.photo}
+      alt={member.name}
+      style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }}
+    />
+  ) : (
+    initials
+  )}
+</div>
+
 
       {/* Name */}
       <div style={{
