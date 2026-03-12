@@ -22,7 +22,7 @@ jobs:
           script: |
             cd ~/cloudtree
             echo "📥 Pulling latest code..."
-            git pull origin main
+            git stash && git pull origin main
             echo "🔐 Loading secrets..."
             ~/cloudtree/load-secrets.sh
             echo "🐳 Rebuilding containers..."
