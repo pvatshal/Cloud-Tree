@@ -248,6 +248,48 @@ function buildLayout(members) {
     });
   }
 
+  // Step 5c: Collision resolution — push overlapping nodes apart per generation
+  const MIN_GAP = H_GAP * 1.5;
+
+  for (let g = 0; g <= maxGen; g++) {
+    const ids = genGroups[g];
+    if (ids.length < 2) continue;
+
+    // Sort all ids in this generation by their current x position
+    const sorted = [...ids].sort((a, b) => (posMap[a]?.x || 0) - (posMap[b]?.x || 0));
+
+    // Build couple awareness so we move couples as atomic units
+    const coupleOf = {}; // id → partner id
+    sorted.forEach(id => {
+      const m = byId[id];
+      const sid = m?.spouse ? String(m.spouse) : null;
+      if (sid && genMap[sid] === g && memberIdSet.has(sid)) {
+        coupleOf[id] = sid;
+        coupleOf[sid] = id;
+      }
+    });
+
+    // Iteratively push nodes right if they overlap with previous node
+    for (let i = 1; i < sorted.length; i++) {
+      const prev = sorted[i - 1];
+      const curr = sorted[i];
+      if (!posMap[prev] || !posMap[curr]) continue;
+
+      const prevRight = posMap[prev].x + NODE_W;
+      const currLeft  = posMap[curr].x;
+      const overlap   = prevRight + MIN_GAP - currLeft;
+
+      if (overlap > 0) {
+        // Push curr (and its spouse if coupled) to the right
+        posMap[curr].x += overlap;
+        const partner = coupleOf[curr];
+        if (partner && posMap[partner] && posMap[partner].x > posMap[curr].x) {
+          posMap[partner].x += overlap;
+        }
+      }
+    }
+  }
+
   // Step 6: Build ReactFlow nodes
   const nodes = members.map(m => ({
     id: String(m._id),
