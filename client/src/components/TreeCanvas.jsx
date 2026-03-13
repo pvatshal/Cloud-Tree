@@ -27,22 +27,18 @@ function buildLayout(members) {
   members.forEach(m => { byId[String(m._id)] = m; });
   const memberIdSet = new Set(members.map(m => String(m._id)));
 
-  // ── Step 1: BFS generation assignment ──────────────────────────────────────
-  // Only follow parent→child edges. Use max-gen (deepest wins) to handle
-  // cases where a person is reachable from multiple root paths.
-  const genMap = {};
-
   const validParents = (m) =>
     (m.parents || []).map(String).filter(p => memberIdSet.has(p));
 
-  const roots = members.filter(m => validParents(m).length === 0);
+  // ── Step 1: BFS generation assignment ──────────────────────────────────────
+  const genMap = {};
+  const roots  = members.filter(m => validParents(m).length === 0);
   if (!roots.length) roots.push(members[0]);
 
-  // BFS — allow revisiting with a higher generation
   const queue = roots.map(r => ({ id: String(r._id), gen: 0 }));
   while (queue.length) {
     const { id, gen } = queue.shift();
-    if (genMap[id] !== undefined && genMap[id] >= gen) continue; // already at this gen or deeper
+    if (genMap[id] !== undefined && genMap[id] >= gen) continue;
     genMap[id] = gen;
     const m = byId[id];
     if (!m) continue;
@@ -52,7 +48,7 @@ function buildLayout(members) {
     });
   }
 
-  // ── Step 2: Propagate spouse generations (iterative until stable) ──────────
+  // ── Step 2: Propagate spouse generations ───────────────────────────────────
   let changed = true;
   while (changed) {
     changed = false;
@@ -68,10 +64,57 @@ function buildLayout(members) {
     });
   }
 
-  // ── Step 3: Assign any still-unvisited members to gen 0 ───────────────────
+  // ── Step 2b: Pull parents down to be just above their children ─────────────
+  // KEY FIX: Arpan+Kinnari have no parents so BFS puts them at gen 0.
+  // But their daughter Drashti is at gen 2 (spouse of Vatsal).
+  // This pass pulls Arpan+Kinnari to gen 1 (one above Drashti).
+  let pullChanged = true;
+  while (pullChanged) {
+    pullChanged = false;
+    members.forEach(m => {
+      const id        = String(m._id);
+      const childGens = (m.children || [])
+        .map(String)
+        .filter(c => memberIdSet.has(c) && genMap[c] !== undefined)
+        .map(c => genMap[c]);
+      if (!childGens.length) return;
+      const required = Math.min(...childGens) - 1;
+      if (genMap[id] === undefined || genMap[id] < required) {
+        genMap[id] = required;
+        pullChanged = true;
+      }
+    });
+  }
+
+  // ── Step 2c: Re-propagate spouse generations after pulling ─────────────────
+  changed = true;
+  while (changed) {
+    changed = false;
+    members.forEach(m => {
+      const id  = String(m._id);
+      const sid = m.spouse ? String(m.spouse) : null;
+      if (!sid || !memberIdSet.has(sid)) return;
+      const ig = genMap[id];
+      const sg = genMap[sid];
+      if (ig !== undefined && sg === undefined) {
+        genMap[sid] = ig; changed = true;
+      } else if (sg !== undefined && ig === undefined) {
+        genMap[id] = sg; changed = true;
+      } else if (ig !== undefined && sg !== undefined && ig !== sg) {
+        const deeper = Math.max(ig, sg);
+        if (ig !== deeper) { genMap[id]  = deeper; changed = true; }
+        if (sg !== deeper) { genMap[sid] = deeper; changed = true; }
+      }
+    });
+  }
+
+  // ── Step 3: Assign unvisited to gen 0, then normalise ─────────────────────
   members.forEach(m => {
     if (genMap[String(m._id)] === undefined) genMap[String(m._id)] = 0;
   });
+
+  const minGen = Math.min(...Object.values(genMap));
+  if (minGen < 0) members.forEach(m => { genMap[String(m._id)] -= minGen; });
 
   const maxGen = Math.max(...Object.values(genMap));
   const genGroups = {};
@@ -81,8 +124,6 @@ function buildLayout(members) {
   const posMap = {};
 
   // ── Helpers ────────────────────────────────────────────────────────────────
-
-  // Return spouse ID only if spouse is in the same generation and in the tree
   function spouseInGen(id, g) {
     const m   = byId[id];
     const sid = m?.spouse ? String(m.spouse) : null;
@@ -90,8 +131,6 @@ function buildLayout(members) {
     return null;
   }
 
-  // Build atomic units (couple = 2 nodes, single = 1 node) from a list of IDs
-  // all belonging to generation g.
   function buildUnits(ids, g) {
     const seen  = new Set();
     const units = [];
@@ -103,12 +142,10 @@ function buildLayout(members) {
         seen.add(sid);
         const m      = byId[id];
         const spouse = byId[sid];
-        // Prefer male-first ordering
-        const malefirst =
+        const order  =
           m?.gender === 'female' && spouse?.gender === 'male'
-            ? [sid, id]
-            : [id, sid];
-        units.push({ type: 'couple', ids: malefirst });
+            ? [sid, id] : [id, sid];
+        units.push({ type: 'couple', ids: order });
       } else {
         units.push({ type: 'single', ids: [id] });
       }
@@ -128,7 +165,6 @@ function buildLayout(members) {
     );
   }
 
-  // Place units left-to-right starting at startX on row y
   function placeUnits(units, startX, y) {
     let x = startX;
     units.forEach((unit, i) => {
@@ -142,64 +178,47 @@ function buildLayout(members) {
     });
   }
 
-  // Bidirectional collision resolution for generation g — run multiple passes
   function resolveCollisions(g) {
     const ids = genGroups[g];
-    if (ids.length < 2) return;
-
-    const MIN_GAP = H_GAP * 0.8; // minimum gap between any two nodes
-
-    // Build couple-partner map for atomic shifting
+    if (!ids || ids.length < 2) return;
+    const MIN_GAP = H_GAP * 0.8;
     const coupleOf = {};
     ids.forEach(id => {
       const sid = spouseInGen(id, g);
       if (sid) { coupleOf[id] = sid; coupleOf[sid] = id; }
     });
-
-    for (let pass = 0; pass < 5; pass++) {
-      // ── Left-to-right pass: push right ──────────────────────────────────
+    for (let pass = 0; pass < 6; pass++) {
       const ltr = [...ids].sort((a, b) => (posMap[a]?.x || 0) - (posMap[b]?.x || 0));
       for (let i = 1; i < ltr.length; i++) {
-        const prev = ltr[i - 1];
-        const curr = ltr[i];
+        const prev = ltr[i - 1], curr = ltr[i];
         if (!posMap[prev] || !posMap[curr]) continue;
         const gap = posMap[curr].x - (posMap[prev].x + NODE_W);
         if (gap < MIN_GAP) {
           const shift = MIN_GAP - gap;
           posMap[curr].x += shift;
-          // Shift partner atomically
           const partner = coupleOf[curr];
-          if (partner && posMap[partner] && posMap[partner].x > posMap[curr].x) {
+          if (partner && posMap[partner] && posMap[partner].x > posMap[curr].x)
             posMap[partner].x += shift;
-          }
         }
       }
-
-      // ── Right-to-left pass: push left ───────────────────────────────────
       const rtl = [...ltr].reverse();
       for (let i = 1; i < rtl.length; i++) {
-        const prev = rtl[i - 1]; // rightmost processed
-        const curr = rtl[i];
+        const prev = rtl[i - 1], curr = rtl[i];
         if (!posMap[prev] || !posMap[curr]) continue;
         const gap = posMap[prev].x - (posMap[curr].x + NODE_W);
         if (gap < MIN_GAP) {
           const shift = MIN_GAP - gap;
           posMap[curr].x -= shift;
-          // Shift partner atomically
           const partner = coupleOf[curr];
-          if (partner && posMap[partner] && posMap[partner].x < posMap[curr].x) {
+          if (partner && posMap[partner] && posMap[partner].x < posMap[curr].x)
             posMap[partner].x -= shift;
-          }
         }
       }
     }
   }
 
-  // Re-center parent unit above its children's bounding box
   function recenterParentAboveChildren(unit, g) {
     const y = g * (NODE_H + V_GAP);
-
-    // Collect all children belonging to any member of this unit
     const childrenSet = new Set();
     unit.ids.forEach(pid => {
       (byId[pid]?.children || []).forEach(cId => {
@@ -208,46 +227,36 @@ function buildLayout(members) {
       });
     });
     if (!childrenSet.size) return;
-
     const childPos = [...childrenSet].map(c => posMap[c]).filter(Boolean);
     if (!childPos.length) return;
-
-    const childMinX   = Math.min(...childPos.map(p => p.x));
-    const childMaxX   = Math.max(...childPos.map(p => p.x + NODE_W));
+    const childMinX    = Math.min(...childPos.map(p => p.x));
+    const childMaxX    = Math.max(...childPos.map(p => p.x + NODE_W));
     const childCenterX = (childMinX + childMaxX) / 2;
-
     if (unit.type === 'couple') {
-      const coupleW  = NODE_W * 2 + H_GAP;
-      const startX   = childCenterX - coupleW / 2;
-      posMap[unit.ids[0]] = { x: startX,              y };
+      const startX = childCenterX - (NODE_W * 2 + H_GAP) / 2;
+      posMap[unit.ids[0]] = { x: startX,                  y };
       posMap[unit.ids[1]] = { x: startX + NODE_W + H_GAP, y };
     } else {
       posMap[unit.ids[0]] = { x: childCenterX - NODE_W / 2, y };
     }
   }
 
-  // ── Step 4: Initial placement — center each generation ─────────────────────
+  // ── Step 4: Initial placement ──────────────────────────────────────────────
   for (let g = 0; g <= maxGen; g++) {
     const ids = genGroups[g];
     if (!ids.length) continue;
     const units  = buildUnits(ids, g);
     const totalW = totalUnitsWidth(units);
-    const y      = g * (NODE_H + V_GAP);
-    placeUnits(units, -totalW / 2, y);
+    placeUnits(units, -totalW / 2, g * (NODE_H + V_GAP));
   }
 
-  // ── Step 5: Bottom-up sibling placement ───────────────────────────────────
-  // For each generation (deepest first), group children by shared parents,
-  // build couple-units within the sibling group (singles left, couples right),
-  // and center the group under its parents.
-  const lockedByCouple = new Set(); // IDs already positioned as part of a couple unit
+  // ── Step 5: Bottom-up sibling centering ───────────────────────────────────
+  const lockedByCouple = new Set();
 
   for (let g = maxGen; g >= 1; g--) {
     const ids = genGroups[g];
     const y   = g * (NODE_H + V_GAP);
-
-    // Identify sibling groups
-    const seenSib      = new Set();
+    const seenSib       = new Set();
     const siblingGroups = [];
 
     ids.forEach(id => {
@@ -255,14 +264,8 @@ function buildLayout(members) {
       const m       = byId[id];
       const parents = (m?.parents || [])
         .map(String)
-        .filter(p => memberIdSet.has(p) && genMap[p] < g); // parent must be above
-
-      if (!parents.length) {
-        seenSib.add(id); // floating — leave at initial position
-        return;
-      }
-
-      // Gather all siblings (share ≥1 parent)
+        .filter(p => memberIdSet.has(p) && genMap[p] < g);
+      if (!parents.length) { seenSib.add(id); return; }
       const siblings = ids.filter(s2 => {
         const sp2 = (byId[s2]?.parents || []).map(String);
         return parents.some(p => sp2.includes(p));
@@ -272,55 +275,36 @@ function buildLayout(members) {
     });
 
     siblingGroups.forEach(({ parents, siblings }) => {
-      // Only use siblings not already locked as part of another couple
       const active = siblings.filter(id => !lockedByCouple.has(id));
       if (!active.length) return;
-
-      // Build units — singles LEFT, couples RIGHT
       const units = buildUnits(active, g);
       units.sort((a, b) => {
         if (a.type === 'single' && b.type === 'couple') return -1;
         if (a.type === 'couple' && b.type === 'single') return  1;
         return 0;
       });
-
-      // Lock all couple members to prevent double-processing
       units.forEach(u => {
         if (u.type === 'couple') u.ids.forEach(id => lockedByCouple.add(id));
       });
-
-      // Find parent center
-      const parentPos = parents.map(p => posMap[p]).filter(Boolean);
+      const parentPos     = parents.map(p => posMap[p]).filter(Boolean);
       if (!parentPos.length) return;
-
       const parentMinX    = Math.min(...parentPos.map(p => p.x));
       const parentMaxX    = Math.max(...parentPos.map(p => p.x + NODE_W));
       const parentCenterX = (parentMinX + parentMaxX) / 2;
-
-      const totalW = totalUnitsWidth(units);
-      placeUnits(units, parentCenterX - totalW / 2, y);
+      placeUnits(units, parentCenterX - totalUnitsWidth(units) / 2, y);
     });
 
-    // Resolve collisions within this generation after placement
     resolveCollisions(g);
   }
 
   // ── Step 6: Top-down parent re-centering ──────────────────────────────────
-  // After children are placed, re-center each parent couple/single above its
-  // children. Process shallowest generation first so re-centering cascades down.
   for (let g = 0; g < maxGen; g++) {
-    const ids   = genGroups[g];
-    const units = buildUnits(ids, g);
-
+    const units = buildUnits(genGroups[g], g);
     units.forEach(unit => recenterParentAboveChildren(unit, g));
-
-    // After re-centering parents, resolve collisions at this level
     resolveCollisions(g);
   }
 
-  // ── Step 7: Final collision sweep on ALL generations ──────────────────────
-  // Run a final global sweep to catch any remaining overlaps caused by
-  // the interplay between bottom-up and top-down passes.
+  // ── Step 7: Final global collision sweep ──────────────────────────────────
   for (let g = 0; g <= maxGen; g++) resolveCollisions(g);
 
   // ── Step 8: Build ReactFlow nodes ─────────────────────────────────────────
