@@ -9,8 +9,9 @@ import { useTheme } from '../context/ThemeContext';
 
 const NODE_W = 200;
 const NODE_H = 160;
-const H_GAP  = 70;
+const H_GAP  = 80;
 const V_GAP  = 110;
+const MIN_GAP = 56; // minimum px between any two nodes
 
 const nodeTypes = {
   memberNode: ({ data }) => {
@@ -19,135 +20,139 @@ const nodeTypes = {
   },
 };
 
-// ── Layout Algorithm ──────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 function buildLayout(members) {
   if (!members.length) return { nodes: [], edges: [] };
 
   const byId = {};
   members.forEach(m => { byId[String(m._id)] = m; });
-  const memberIdSet = new Set(members.map(m => String(m._id)));
+  const allIds = new Set(members.map(m => String(m._id)));
 
-  const validParents = (m) =>
-    (m.parents || []).map(String).filter(p => memberIdSet.has(p));
+  const sid = (m) => m?.spouse ? String(m.spouse) : null;
+  const validParents = (m) => (m.parents || []).map(String).filter(p => allIds.has(p));
 
-  // ── Step 1: BFS generation assignment ──────────────────────────────────────
-  // Use "max gen wins" so a person reachable from multiple paths gets the deepest gen
-  const genMap = {};
-  const roots  = members.filter(m => validParents(m).length === 0);
+  // ════════════════════════════════════════════════════════════════════════════
+  // PHASE 1 — GENERATION ASSIGNMENT
+  // ════════════════════════════════════════════════════════════════════════════
+
+  const gen = {};   // id → generation number
+
+  // STEP 1 — BFS (max-gen wins: a member gets the deepest gen reachable)
+  const roots = members.filter(m => validParents(m).length === 0);
   if (!roots.length) roots.push(members[0]);
 
-  const queue = roots.map(r => ({ id: String(r._id), gen: 0 }));
-  while (queue.length) {
-    const { id, gen } = queue.shift();
-    if (genMap[id] !== undefined && genMap[id] >= gen) continue;
-    genMap[id] = gen;
-    const m = byId[id];
-    if (!m) continue;
-    (m.children || []).forEach(c => {
-      const cId = String(c);
-      if (memberIdSet.has(cId)) queue.push({ id: cId, gen: gen + 1 });
+  const q = roots.map(r => ({ id: String(r._id), g: 0 }));
+  while (q.length) {
+    const { id, g } = q.shift();
+    if (gen[id] !== undefined && gen[id] >= g) continue;
+    gen[id] = g;
+    (byId[id]?.children || []).forEach(c => {
+      const cid = String(c);
+      if (allIds.has(cid)) q.push({ id: cid, g: g + 1 });
     });
   }
 
-  // ── Step 2: First spouse propagation ──────────────────────────────────────
-  let changed = true;
-  while (changed) {
-    changed = false;
+  // STEP 2 — Propagate spouse gens (fill in undefined spouses)
+  let dirty = true;
+  while (dirty) {
+    dirty = false;
     members.forEach(m => {
-      const id  = String(m._id);
-      const sid = m.spouse ? String(m.spouse) : null;
-      if (!sid || !memberIdSet.has(sid)) return;
-      if (genMap[id] !== undefined && genMap[sid] === undefined) {
-        genMap[sid] = genMap[id]; changed = true;
-      } else if (genMap[sid] !== undefined && genMap[id] === undefined) {
-        genMap[id] = genMap[sid]; changed = true;
+      const a = String(m._id), b = sid(m);
+      if (!b || !allIds.has(b)) return;
+      if (gen[a] !== undefined && gen[b] === undefined) { gen[b] = gen[a]; dirty = true; }
+      else if (gen[b] !== undefined && gen[a] === undefined) { gen[a] = gen[b]; dirty = true; }
+    });
+  }
+
+  // ── KEY FIX: spouse RECONCILIATION before parent-pulling ──────────────────
+  // STEP 3 — Reconcile mismatched spouse gens (use deeper gen)
+  // This MUST run before parent-pulling so Drashti is correctly promoted to
+  // Vatsal's gen BEFORE we try to pull Arpan+Kinnari down.
+  dirty = true;
+  while (dirty) {
+    dirty = false;
+    members.forEach(m => {
+      const a = String(m._id), b = sid(m);
+      if (!b || !allIds.has(b)) return;
+      if (gen[a] === undefined || gen[b] === undefined) return;
+      if (gen[a] !== gen[b]) {
+        const deeper = Math.max(gen[a], gen[b]);
+        if (gen[a] !== deeper) { gen[a] = deeper; dirty = true; }
+        if (gen[b] !== deeper) { gen[b] = deeper; dirty = true; }
       }
     });
   }
 
-  // ── Step 2b: Pull parents to be exactly one gen above their children ────────
-  // Fixes: in-laws with no parents in tree default to gen 0 but their child
-  // married into a deeper gen (e.g. Arpan+Kinnari should be at gen N-1
-  // where N = Drashti's gen)
-  let pullChanged = true;
-  while (pullChanged) {
-    pullChanged = false;
+  // STEP 4 — Pull parents down so they are exactly one gen above their children
+  // (Now Drashti is at Vatsal's gen, so Arpan+Kinnari get pulled correctly)
+  dirty = true;
+  while (dirty) {
+    dirty = false;
     members.forEach(m => {
-      const id        = String(m._id);
+      const id = String(m._id);
       const childGens = (m.children || [])
-        .map(String)
-        .filter(c => memberIdSet.has(c) && genMap[c] !== undefined)
-        .map(c => genMap[c]);
+        .map(String).filter(c => allIds.has(c) && gen[c] !== undefined)
+        .map(c => gen[c]);
       if (!childGens.length) return;
-      const required = Math.min(...childGens) - 1;
-      if (genMap[id] === undefined || genMap[id] < required) {
-        genMap[id] = required;
-        pullChanged = true;
-      }
+      const need = Math.min(...childGens) - 1;
+      if (gen[id] === undefined || gen[id] < need) { gen[id] = need; dirty = true; }
     });
   }
 
-  // ── Step 2c: Re-propagate spouses — use deeper gen, keep couple same gen ───
-  changed = true;
-  while (changed) {
-    changed = false;
+  // STEP 5 — Re-propagate spouse gens after pulling (fill & reconcile)
+  dirty = true;
+  while (dirty) {
+    dirty = false;
     members.forEach(m => {
-      const id  = String(m._id);
-      const sid = m.spouse ? String(m.spouse) : null;
-      if (!sid || !memberIdSet.has(sid)) return;
-      const ig = genMap[id];
-      const sg = genMap[sid];
-      if (ig !== undefined && sg === undefined) {
-        genMap[sid] = ig; changed = true;
-      } else if (sg !== undefined && ig === undefined) {
-        genMap[id] = sg; changed = true;
-      } else if (ig !== undefined && sg !== undefined && ig !== sg) {
-        const deeper = Math.max(ig, sg);
-        if (ig !== deeper) { genMap[id]  = deeper; changed = true; }
-        if (sg !== deeper) { genMap[sid] = deeper; changed = true; }
+      const a = String(m._id), b = sid(m);
+      if (!b || !allIds.has(b)) return;
+      if (gen[a] !== undefined && gen[b] === undefined) { gen[b] = gen[a]; dirty = true; }
+      else if (gen[b] !== undefined && gen[a] === undefined) { gen[a] = gen[b]; dirty = true; }
+      else if (gen[a] !== undefined && gen[b] !== undefined && gen[a] !== gen[b]) {
+        const deeper = Math.max(gen[a], gen[b]);
+        if (gen[a] !== deeper) { gen[a] = deeper; dirty = true; }
+        if (gen[b] !== deeper) { gen[b] = deeper; dirty = true; }
       }
     });
   }
 
-  // ── Step 3: Assign unvisited → gen 0, then normalise so min = 0 ───────────
-  members.forEach(m => {
-    if (genMap[String(m._id)] === undefined) genMap[String(m._id)] = 0;
-  });
+  // Assign unvisited → 0, normalise so min = 0
+  members.forEach(m => { if (gen[String(m._id)] === undefined) gen[String(m._id)] = 0; });
+  const minG = Math.min(...Object.values(gen));
+  if (minG < 0) members.forEach(m => { gen[String(m._id)] -= minG; });
 
-  const minGen = Math.min(...Object.values(genMap));
-  if (minGen < 0) members.forEach(m => { genMap[String(m._id)] -= minGen; });
+  const maxG = Math.max(...Object.values(gen));
+  const byGen = {};
+  for (let g = 0; g <= maxG; g++) byGen[g] = [];
+  members.forEach(m => byGen[gen[String(m._id)]].push(String(m._id)));
 
-  const maxGen = Math.max(...Object.values(genMap));
-  const genGroups = {};
-  for (let g = 0; g <= maxGen; g++) genGroups[g] = [];
-  members.forEach(m => genGroups[genMap[String(m._id)]].push(String(m._id)));
+  // ════════════════════════════════════════════════════════════════════════════
+  // PHASE 2 — LAYOUT
+  // ════════════════════════════════════════════════════════════════════════════
 
-  const posMap = {};
+  const pos = {};   // id → {x, y}
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
-  function spouseInGen(id, g) {
-    const m   = byId[id];
-    const sid = m?.spouse ? String(m.spouse) : null;
-    if (sid && memberIdSet.has(sid) && genMap[sid] === g) return sid;
-    return null;
+  // Helpers ──────────────────────────────────────────────────────────────────
+
+  function spouseAt(id, g) {
+    const s = sid(byId[id]);
+    return (s && allIds.has(s) && gen[s] === g) ? s : null;
   }
 
-  // Build atomic units from a flat id list — couple = 2 members, single = 1
-  function buildUnits(ids, g) {
+  // ── KEY FIX: only form couples with members inside the given id set ────────
+  // Prevents a cross-family spouse from being pulled into the sibling group.
+  function makeUnits(ids) {
+    const idSet = new Set(ids);
     const seen  = new Set();
     const units = [];
     ids.forEach(id => {
       if (seen.has(id)) return;
       seen.add(id);
-      const sid = spouseInGen(id, g);
-      if (sid && !seen.has(sid)) {
-        seen.add(sid);
-        const mo = byId[id];
-        const so = byId[sid];
-        // Male left, female right
-        const order =
-          mo?.gender === 'female' && so?.gender === 'male'
-            ? [sid, id] : [id, sid];
+      const s = spouseAt(id, gen[id]);
+      if (s && !seen.has(s) && idSet.has(s)) {
+        seen.add(s);
+        const mo = byId[id], so = byId[s];
+        const order = (mo?.gender === 'female' && so?.gender === 'male') ? [s, id] : [id, s];
         units.push({ type: 'couple', ids: order });
       } else {
         units.push({ type: 'single', ids: [id] });
@@ -156,259 +161,275 @@ function buildLayout(members) {
     return units;
   }
 
-  function unitWidth(unit) {
-    return unit.type === 'couple' ? NODE_W * 2 + H_GAP : NODE_W;
-  }
-
-  function totalUnitsWidth(units) {
-    if (!units.length) return 0;
-    return (
-      units.reduce((acc, u) => acc + unitWidth(u), 0) +
-      Math.max(0, units.length - 1) * H_GAP
-    );
+  function uw(u) { return u.type === 'couple' ? NODE_W * 2 + H_GAP : NODE_W; }
+  function totalW(units) {
+    return units.reduce((s, u) => s + uw(u), 0) + Math.max(0, units.length - 1) * H_GAP;
   }
 
   function placeUnits(units, startX, y) {
     let x = startX;
-    units.forEach((unit, i) => {
-      if (unit.type === 'couple') {
-        posMap[unit.ids[0]] = { x, y };
-        posMap[unit.ids[1]] = { x: x + NODE_W + H_GAP, y };
+    units.forEach((u, i) => {
+      if (u.type === 'couple') {
+        pos[u.ids[0]] = { x, y };
+        pos[u.ids[1]] = { x: x + NODE_W + H_GAP, y };
       } else {
-        posMap[unit.ids[0]] = { x, y };
+        pos[u.ids[0]] = { x, y };
       }
-      x += unitWidth(unit) + (i < units.length - 1 ? H_GAP : 0);
+      if (i < units.length - 1) x += uw(u) + H_GAP;
     });
   }
 
-  // Bidirectional collision resolution — runs multiple passes, couples move atomically
-  function resolveCollisions(g) {
-    const ids = genGroups[g];
+  // Bidirectional collision fix, couples move atomically
+  function fixCollisions(g) {
+    const ids = byGen[g];
     if (!ids || ids.length < 2) return;
-    const MIN_GAP = H_GAP * 0.8;
 
-    const coupleOf = {};
+    const partnerOf = {};
     ids.forEach(id => {
-      const sid = spouseInGen(id, g);
-      if (sid) { coupleOf[id] = sid; coupleOf[sid] = id; }
+      const s = spouseAt(id, g);
+      if (s) { partnerOf[id] = s; partnerOf[s] = id; }
     });
 
-    for (let pass = 0; pass < 8; pass++) {
-      // Left→right: push right
-      const ltr = [...ids].sort((a, b) => (posMap[a]?.x || 0) - (posMap[b]?.x || 0));
+    for (let pass = 0; pass < 10; pass++) {
+      const ltr = [...ids].sort((a, b) => (pos[a]?.x ?? 0) - (pos[b]?.x ?? 0));
+
+      // left→right: push right
       for (let i = 1; i < ltr.length; i++) {
-        const prev = ltr[i - 1], curr = ltr[i];
-        if (!posMap[prev] || !posMap[curr]) continue;
-        const gap = posMap[curr].x - (posMap[prev].x + NODE_W);
+        const [p, c] = [ltr[i - 1], ltr[i]];
+        if (!pos[p] || !pos[c]) continue;
+        const gap = pos[c].x - (pos[p].x + NODE_W);
         if (gap < MIN_GAP) {
-          const shift = MIN_GAP - gap;
-          posMap[curr].x += shift;
-          const p = coupleOf[curr];
-          if (p && posMap[p] && posMap[p].x > posMap[curr].x) posMap[p].x += shift;
+          const d = MIN_GAP - gap;
+          pos[c].x += d;
+          const pt = partnerOf[c];
+          if (pt && pos[pt] && pos[pt].x > pos[c].x) pos[pt].x += d;
         }
       }
-      // Right→left: push left
+      // right→left: push left
       for (let i = ltr.length - 2; i >= 0; i--) {
-        const next = ltr[i + 1], curr = ltr[i];
-        if (!posMap[next] || !posMap[curr]) continue;
-        const gap = posMap[next].x - (posMap[curr].x + NODE_W);
+        const [n, c] = [ltr[i + 1], ltr[i]];
+        if (!pos[n] || !pos[c]) continue;
+        const gap = pos[n].x - (pos[c].x + NODE_W);
         if (gap < MIN_GAP) {
-          const shift = MIN_GAP - gap;
-          posMap[curr].x -= shift;
-          const p = coupleOf[curr];
-          if (p && posMap[p] && posMap[p].x < posMap[curr].x) posMap[p].x -= shift;
+          const d = MIN_GAP - gap;
+          pos[c].x -= d;
+          const pt = partnerOf[c];
+          if (pt && pos[pt] && pos[pt].x < pos[c].x) pos[pt].x -= d;
         }
       }
     }
   }
 
-  // Re-center a parent unit above its children's bounding box
-  function recenterParentAboveChildren(unit, g) {
-    const y = g * (NODE_H + V_GAP);
-    const childrenSet = new Set();
+  // Center a parent unit above its children's bounding box
+  function recenterAboveChildren(unit, g) {
+    const y       = g * (NODE_H + V_GAP);
+    const childIds = new Set();
     unit.ids.forEach(pid => {
-      (byId[pid]?.children || []).forEach(cId => {
-        const cs = String(cId);
-        if (memberIdSet.has(cs)) childrenSet.add(cs);
+      (byId[pid]?.children || []).forEach(c => {
+        const cs = String(c);
+        if (allIds.has(cs)) childIds.add(cs);
       });
     });
-    if (!childrenSet.size) return;
-    const childPos = [...childrenSet].map(c => posMap[c]).filter(Boolean);
-    if (!childPos.length) return;
-    const cMinX = Math.min(...childPos.map(p => p.x));
-    const cMaxX = Math.max(...childPos.map(p => p.x + NODE_W));
-    const cCenterX = (cMinX + cMaxX) / 2;
+    if (!childIds.size) return;
+    const cpos = [...childIds].map(c => pos[c]).filter(Boolean);
+    if (!cpos.length) return;
+    const cx = (Math.min(...cpos.map(p => p.x)) + Math.max(...cpos.map(p => p.x + NODE_W))) / 2;
     if (unit.type === 'couple') {
-      const startX = cCenterX - (NODE_W * 2 + H_GAP) / 2;
-      posMap[unit.ids[0]] = { x: startX,                  y };
-      posMap[unit.ids[1]] = { x: startX + NODE_W + H_GAP, y };
+      const sx = cx - (NODE_W * 2 + H_GAP) / 2;
+      pos[unit.ids[0]] = { x: sx, y };
+      pos[unit.ids[1]] = { x: sx + NODE_W + H_GAP, y };
     } else {
-      posMap[unit.ids[0]] = { x: cCenterX - NODE_W / 2, y };
+      pos[unit.ids[0]] = { x: cx - NODE_W / 2, y };
     }
   }
 
-  // ── Step 4: Initial centred placement per generation ──────────────────────
-  for (let g = 0; g <= maxGen; g++) {
-    const ids = genGroups[g];
-    if (!ids.length) continue;
-    const units  = buildUnits(ids, g);
-    const totalW = totalUnitsWidth(units);
-    placeUnits(units, -totalW / 2, g * (NODE_H + V_GAP));
+  // ── LAYOUT A — initial centred placement ──────────────────────────────────
+  for (let g = 0; g <= maxG; g++) {
+    if (!byGen[g].length) continue;
+    const units = makeUnits(byGen[g]);
+    placeUnits(units, -totalW(units) / 2, g * (NODE_H + V_GAP));
   }
 
-  // ── Step 5: Bottom-up sibling centering ───────────────────────────────────
-  // For each generation bottom→top, group children by shared parents,
-  // sort (singles LEFT, couples RIGHT), center under parent midpoint.
-  const lockedByCouple = new Set();
+  // ── LAYOUT B — bottom-up sibling centering ────────────────────────────────
+  // Singles go LEFT of couples (prevents a single sibling between a married pair)
+  const coupleMembers = new Set();
 
-  for (let g = maxGen; g >= 1; g--) {
-    const ids = genGroups[g];
+  for (let g = maxG; g >= 1; g--) {
+    const ids = byGen[g];
     const y   = g * (NODE_H + V_GAP);
-    const seenSib       = new Set();
-    const siblingGroups = [];
+    const visited = new Set();
+    const groups  = [];
 
     ids.forEach(id => {
-      if (seenSib.has(id)) return;
-      const m       = byId[id];
-      const parents = (m?.parents || [])
-        .map(String)
-        .filter(p => memberIdSet.has(p) && genMap[p] < g);
-      if (!parents.length) { seenSib.add(id); return; }
-      const siblings = ids.filter(s2 => {
-        const sp2 = (byId[s2]?.parents || []).map(String);
-        return parents.some(p => sp2.includes(p));
+      if (visited.has(id)) return;
+      const pids = validParents(byId[id]).filter(p => gen[p] < g);
+      if (!pids.length) { visited.add(id); return; }
+      // Siblings share at least one parent
+      const sibs = ids.filter(s => {
+        const sp = validParents(byId[s]).filter(p => gen[p] < g);
+        return pids.some(p => sp.includes(p));
       });
-      siblings.forEach(s => seenSib.add(s));
-      siblingGroups.push({ parents, siblings });
+      sibs.forEach(s => visited.add(s));
+      groups.push({ pids, sibs });
     });
 
-    siblingGroups.forEach(({ parents, siblings }) => {
-      const active = siblings.filter(id => !lockedByCouple.has(id));
+    groups.forEach(({ pids, sibs }) => {
+      const active = sibs.filter(id => !coupleMembers.has(id));
       if (!active.length) return;
 
-      const units = buildUnits(active, g);
-      // Singles LEFT of couples → prevents single sibling between a couple
-      units.sort((a, b) => {
-        if (a.type === 'single' && b.type === 'couple') return -1;
-        if (a.type === 'couple' && b.type === 'single') return  1;
-        return 0;
-      });
+      const units = makeUnits(active);
+      units.sort((a, b) =>
+        a.type === b.type ? 0 : a.type === 'single' ? -1 : 1
+      );
       units.forEach(u => {
-        if (u.type === 'couple') u.ids.forEach(id => lockedByCouple.add(id));
+        if (u.type === 'couple') u.ids.forEach(id => coupleMembers.add(id));
       });
 
-      const parentPos     = parents.map(p => posMap[p]).filter(Boolean);
-      if (!parentPos.length) return;
-      const parentMinX    = Math.min(...parentPos.map(p => p.x));
-      const parentMaxX    = Math.max(...parentPos.map(p => p.x + NODE_W));
-      const parentCenterX = (parentMinX + parentMaxX) / 2;
-
-      placeUnits(units, parentCenterX - totalUnitsWidth(units) / 2, y);
+      const pp   = pids.map(p => pos[p]).filter(Boolean);
+      if (!pp.length) return;
+      const pcx  = (Math.min(...pp.map(p => p.x)) + Math.max(...pp.map(p => p.x + NODE_W))) / 2;
+      placeUnits(units, pcx - totalW(units) / 2, y);
     });
 
-    resolveCollisions(g);
+    fixCollisions(g);
   }
 
-  // ── Step 5b: Cross-family couple adhesion ─────────────────────────────────
-  // Married couples from different families (different sibling groups) were
-  // placed independently in step 5. Pull them together so they're adjacent.
-  // Rule: move the member with NO parents in tree toward the one who has parents.
-  // If both have parents, move to midpoint.
-  const seenAdhesion = new Set();
+  // ── LAYOUT C — cross-family couple adhesion ───────────────────────────────
+  // Married pairs from different sibling groups get pulled adjacent.
+  const seenPairs = new Set();
   members.forEach(m => {
-    const id  = String(m._id);
-    const sid = m.spouse ? String(m.spouse) : null;
-    if (!sid || !memberIdSet.has(sid)) return;
-    const key = [id, sid].sort().join('-');
-    if (seenAdhesion.has(key)) return;
-    seenAdhesion.add(key);
+    const a = String(m._id), b = sid(m);
+    if (!b || !allIds.has(b)) return;
+    const key = [a, b].sort().join('|');
+    if (seenPairs.has(key)) return;
+    seenPairs.add(key);
 
-    const g = genMap[id];
-    if (genMap[sid] !== g) return;
-    if (!posMap[id] || !posMap[sid]) return;
+    const g = gen[a];
+    if (gen[b] !== g || !pos[a] || !pos[b]) return;
 
-    // Check if already adjacent (within 1px tolerance)
-    const dist = Math.abs(posMap[id].x - posMap[sid].x);
-    if (Math.abs(dist - (NODE_W + H_GAP)) < 2) return; // already adjacent
+    // Already adjacent?
+    if (Math.abs(Math.abs(pos[a].x - pos[b].x) - (NODE_W + H_GAP)) < 2) return;
 
-    const mo = byId[id];
-    const so = byId[sid];
-
-    // Determine left/right order (male left)
+    const mo = byId[a], so = byId[b];
     const [leftId, rightId] =
-      mo?.gender === 'female' && so?.gender === 'male'
-        ? [sid, id] : [id, sid];
+      mo?.gender === 'female' && so?.gender === 'male' ? [b, a] : [a, b];
 
-    // Decide anchor: prefer the one with parents in tree
-    const idHasParents  = (mo?.parents || []).some(p => memberIdSet.has(String(p)));
-    const sidHasParents = (so?.parents || []).some(p => memberIdSet.has(String(p)));
+    const aHasParents = validParents(mo).length > 0;
+    const bHasParents = validParents(so).length > 0;
 
-    let centerX;
-    if (idHasParents && !sidHasParents) {
-      // Anchor to id's position
-      centerX = posMap[id].x + NODE_W / 2;
-    } else if (sidHasParents && !idHasParents) {
-      // Anchor to sid's position
-      centerX = posMap[sid].x + NODE_W / 2;
-    } else {
-      // Both or neither have parents — use midpoint
-      centerX = (posMap[id].x + posMap[sid].x + NODE_W) / 2;
-    }
+    let cx;
+    if (aHasParents && !bHasParents)       cx = pos[a].x + NODE_W / 2;
+    else if (bHasParents && !aHasParents)  cx = pos[b].x + NODE_W / 2;
+    else                                   cx = (pos[a].x + pos[b].x + NODE_W) / 2;
 
     const y = g * (NODE_H + V_GAP);
-    posMap[leftId]  = { x: centerX - NODE_W - H_GAP / 2, y };
-    posMap[rightId] = { x: centerX + H_GAP / 2,          y };
+    pos[leftId]  = { x: cx - NODE_W - H_GAP / 2, y };
+    pos[rightId] = { x: cx + H_GAP / 2, y };
   });
 
-  // Re-run collision resolution after adhesion
-  for (let g = 0; g <= maxGen; g++) resolveCollisions(g);
+  // After adhesion, fix collisions at all gens
+  for (let g = 0; g <= maxG; g++) fixCollisions(g);
 
-  // ── Step 6: Top-down parent re-centering ──────────────────────────────────
-  // After children (incl. cross-family) are finally placed, re-center each
-  // parent unit above its children. Run shallow→deep so cascades work.
-  for (let g = 0; g < maxGen; g++) {
-    const units = buildUnits(genGroups[g], g);
-    units.forEach(unit => recenterParentAboveChildren(unit, g));
-    resolveCollisions(g);
+  // ── LAYOUT D — multiple rounds of top-down re-centering ───────────────────
+  // Each round: re-center parents above final child positions, then fix
+  // collisions. Run 3 rounds so cascading families converge.
+  for (let round = 0; round < 3; round++) {
+    for (let g = 0; g < maxG; g++) {
+      const units = makeUnits(byGen[g]);
+      units.forEach(u => recenterAboveChildren(u, g));
+      fixCollisions(g);
+    }
+    // Also tighten children toward parent after parents moved
+    for (let g = maxG; g >= 1; g--) {
+      const ids = byGen[g];
+      const visited = new Set();
+      ids.forEach(id => {
+        if (visited.has(id)) return;
+        const pids = validParents(byId[id]).filter(p => gen[p] < g);
+        if (!pids.length) { visited.add(id); return; }
+        const sibs = ids.filter(s => {
+          const sp = validParents(byId[s]).filter(p => gen[p] < g);
+          return pids.some(p => sp.includes(p));
+        });
+        sibs.forEach(s => visited.add(s));
+
+        const active = sibs.filter(id => !coupleMembers.has(id) ||
+          (coupleMembers.has(id) && sibs.includes(id)));
+        if (!active.length) return;
+
+        const pp  = pids.map(p => pos[p]).filter(Boolean);
+        if (!pp.length) return;
+        const pcx = (Math.min(...pp.map(p => p.x)) + Math.max(...pp.map(p => p.x + NODE_W))) / 2;
+        const units = makeUnits(active);
+        units.sort((a, b) => a.type === b.type ? 0 : a.type === 'single' ? -1 : 1);
+        placeUnits(units, pcx - totalW(units) / 2, g * (NODE_H + V_GAP));
+      });
+      fixCollisions(g);
+    }
+
+    // Re-apply couple adhesion after each round
+    const seen2 = new Set();
+    members.forEach(m => {
+      const a = String(m._id), b = sid(m);
+      if (!b || !allIds.has(b)) return;
+      const key = [a, b].sort().join('|');
+      if (seen2.has(key)) return;
+      seen2.add(key);
+      const g = gen[a];
+      if (gen[b] !== g || !pos[a] || !pos[b]) return;
+      if (Math.abs(Math.abs(pos[a].x - pos[b].x) - (NODE_W + H_GAP)) < 2) return;
+      const mo = byId[a], so = byId[b];
+      const [leftId, rightId] =
+        mo?.gender === 'female' && so?.gender === 'male' ? [b, a] : [a, b];
+      const aHasParents = validParents(mo).length > 0;
+      const bHasParents = validParents(so).length > 0;
+      let cx;
+      if (aHasParents && !bHasParents)      cx = pos[a].x + NODE_W / 2;
+      else if (bHasParents && !aHasParents) cx = pos[b].x + NODE_W / 2;
+      else                                  cx = (pos[a].x + pos[b].x + NODE_W) / 2;
+      const y = g * (NODE_H + V_GAP);
+      pos[leftId]  = { x: cx - NODE_W - H_GAP / 2, y };
+      pos[rightId] = { x: cx + H_GAP / 2, y };
+    });
+    for (let g = 0; g <= maxG; g++) fixCollisions(g);
   }
 
-  // ── Step 7: Final global collision sweep ──────────────────────────────────
-  for (let g = 0; g <= maxGen; g++) resolveCollisions(g);
+  // ── Final sweep ───────────────────────────────────────────────────────────
+  for (let g = 0; g <= maxG; g++) fixCollisions(g);
 
-  // ── Step 8: Build ReactFlow nodes ─────────────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════════════
+  // PHASE 3 — BUILD REACTFLOW OUTPUT
+  // ════════════════════════════════════════════════════════════════════════════
+
   const nodes = members.map(m => ({
     id:       String(m._id),
     type:     'memberNode',
-    position: posMap[String(m._id)] || { x: 0, y: 0 },
+    position: pos[String(m._id)] || { x: 0, y: 0 },
     data:     { member: m, onEdit: null, onDelete: null },
   }));
 
-  // ── Step 9: Build edges ───────────────────────────────────────────────────
   const parentEdges = members.flatMap(m =>
-    (m.children || [])
-      .map(String)
-      .filter(cId => memberIdSet.has(cId))
-      .map(cId => ({
-        id:        `parent-${String(m._id)}-${cId}`,
-        source:    String(m._id),
-        target:    cId,
-        type:      'smoothstep',
-        style:     { stroke: '#4ade80', strokeWidth: 1.8, opacity: 0.85 },
-        markerEnd: { type: 'arrowclosed', color: '#4ade80', width: 16, height: 16 },
-      }))
+    (m.children || []).map(String).filter(c => allIds.has(c)).map(c => ({
+      id:        `p-${String(m._id)}-${c}`,
+      source:    String(m._id),
+      target:    c,
+      type:      'smoothstep',
+      style:     { stroke: '#4ade80', strokeWidth: 1.8, opacity: 0.85 },
+      markerEnd: { type: 'arrowclosed', color: '#4ade80', width: 16, height: 16 },
+    }))
   );
 
-  const seenSpouses = new Set();
+  const seenSpouse = new Set();
   const spouseEdges = members
-    .filter(m => m.spouse && memberIdSet.has(String(m.spouse)))
+    .filter(m => m.spouse && allIds.has(String(m.spouse)))
     .filter(m => {
-      const key = [String(m._id), String(m.spouse)].sort().join('-');
-      if (seenSpouses.has(key)) return false;
-      seenSpouses.add(key);
+      const key = [String(m._id), String(m.spouse)].sort().join('|');
+      if (seenSpouse.has(key)) return false;
+      seenSpouse.add(key);
       return true;
     })
     .map(m => ({
-      id:           `spouse-${[String(m._id), String(m.spouse)].sort().join('-')}`,
+      id:           `s-${[String(m._id), String(m.spouse)].sort().join('|')}`,
       source:       String(m._id),
       target:       String(m.spouse),
       sourceHandle: 'right',
@@ -424,58 +445,45 @@ function buildLayout(members) {
   return { nodes, edges: [...parentEdges, ...spouseEdges] };
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 export default function TreeCanvas({ members, onEdit, onDelete }) {
   const { dark } = useTheme();
 
-  const injectHandlers = (nodes) =>
+  const inject = (nodes) =>
     nodes.map(n => ({ ...n, data: { ...n.data, onEdit, onDelete } }));
 
-  const { nodes: initNodes, edges: initEdges } = useMemo(
-    () => buildLayout(members), [members]
-  );
+  const { nodes: initN, edges: initE } = useMemo(() => buildLayout(members), [members]);
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(injectHandlers(initNodes));
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initEdges);
-
-  const onConnect = useCallback(
-    params => setEdges(eds => addEdge(params, eds)), []
-  );
+  const [nodes, setNodes, onNodesChange] = useNodesState(inject(initN));
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initE);
+  const onConnect = useCallback(p => setEdges(e => addEdge(p, e)), []);
 
   useEffect(() => {
-    const { nodes: ln, edges: le } = buildLayout(members);
-    setNodes(injectHandlers(ln));
-    setEdges(le);
+    const { nodes: n, edges: e } = buildLayout(members);
+    setNodes(inject(n));
+    setEdges(e);
   }, [members, onEdit, onDelete]);
 
   return (
     <div style={{ width: '100vw', height: 'calc(100vh - 64px)' }}>
       <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
+        nodes={nodes} edges={edges}
+        onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect}
         nodeTypes={nodeTypes}
-        fitView
-        fitViewOptions={{ padding: 0.3 }}
-        minZoom={0.15}
+        fitView fitViewOptions={{ padding: 0.3 }} minZoom={0.15}
         proOptions={{ hideAttribution: true }}
       >
         <MiniMap
           nodeColor={n => {
             const m = members.find(m => String(m._id) === n.id);
-            const colors = { male: '#3b82f6', female: '#ec4899', other: '#8b5cf6' };
-            return colors[m?.gender] || '#4ade80';
+            return { male: '#3b82f6', female: '#ec4899', other: '#8b5cf6' }[m?.gender] || '#4ade80';
           }}
           maskColor={dark ? 'rgba(0,0,0,0.6)' : 'rgba(240,253,244,0.7)'}
           style={{ background: dark ? '#0d1f13' : '#f0fdf4' }}
         />
         <Controls showInteractive={false} />
         <Background
-          color={dark ? '#1e3a2a' : '#bbf7d0'}
-          gap={24}
-          size={1.5}
+          color={dark ? '#1e3a2a' : '#bbf7d0'} gap={24} size={1.5}
           style={{ opacity: dark ? 0.4 : 0.7 }}
         />
       </ReactFlow>
