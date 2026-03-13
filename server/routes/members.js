@@ -1,62 +1,7 @@
-// import express from 'express';
-// import Member from '../models/Member.js';
-// import { protect } from '../middleware/authMiddleware.js';
-
-// const router = express.Router();
-
-// router.get('/', protect, async (req, res) => {
-//   try {
-//     const members = await Member.find({ userId: req.user.id });
-//     res.json(members);
-//   } catch (err) {
-//     res.status(500).json({ message: err.message });
-//   }
-// });
-
-// router.post('/', protect, async (req, res) => {
-//   try {
-//     const member = await Member.create({ ...req.body, userId: req.user.id });
-//     res.status(201).json(member);
-//   } catch (err) {
-//     res.status(500).json({ message: err.message });
-//   }
-// });
-
-// router.put('/:id', protect, async (req, res) => {
-//   try {
-//     const { $push_child, $push_parent, ...rest } = req.body;
-//     let update = { ...rest };
-
-//     if ($push_child) update = { ...update, $push: { children: $push_child } };
-//     if ($push_parent) update = { ...update, $push: { parents: $push_parent } };
-
-//     const member = await Member.findByIdAndUpdate(req.params.id, update, { new: true });
-//     res.json(member);
-//   } catch (err) {
-//     res.status(500).json({ message: err.message });
-//   }
-// });
-
-// router.delete('/:id', protect, async (req, res) => {
-//   try {
-//     const member = await Member.findById(req.params.id);
-//     // Clean up all references to this member
-//     await Member.updateMany(
-//       { $or: [{ children: req.params.id }, { parents: req.params.id }, { spouse: req.params.id }] },
-//       { $pull: { children: req.params.id, parents: req.params.id }, $unset: { spouse: '' } }
-//     );
-//     await Member.findByIdAndDelete(req.params.id);
-//     res.json({ message: 'Member deleted' });
-//   } catch (err) {
-//     res.status(500).json({ message: err.message });
-//   }
-// });
-
-// export default router;
-
 import express from 'express';
 import Member from '../models/Member.js';
 import { protect } from '../middleware/authMiddleware.js';
+import Notification from '../models/Notification.js';
 
 const router = express.Router();
 
@@ -68,74 +13,70 @@ router.get('/', protect, async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
-
+// POST — add member
 router.post('/', protect, async (req, res) => {
   try {
-    const member = await Member.create({ ...req.body, userId: req.user.id });
+    const { name, gender, dob, anniversary, email, phone, notes, photo, parents, children, spouse } = req.body;
+    const member = await Member.create({
+      user: req.user.id, name, gender, dob, anniversary, email, phone, notes, photo,
+      parents: parents || [], children: children || [], spouse: spouse || null,
+    });
+
+    // Smart relationship inference (existing logic)
+    if (spouse) {
+      await Member.findByIdAndUpdate(spouse, { spouse: member._id });
+      const spouseDoc = await Member.findById(spouse);
+      if (spouseDoc?.children?.length) {
+        await Member.findByIdAndUpdate(member._id, { $addToSet: { children: { $each: spouseDoc.children } } });
+        await Member.updateMany({ _id: { $in: spouseDoc.children } }, { $addToSet: { parents: member._id } });
+      }
+      if (member.children?.length) {
+        await Member.findByIdAndUpdate(spouse, { $addToSet: { children: { $each: member.children } } });
+        await Member.updateMany({ _id: { $in: member.children } }, { $addToSet: { parents: spouse } });
+      }
+    }
+    if (parents?.length) {
+      await Member.updateMany({ _id: { $in: parents } }, { $addToSet: { children: member._id } });
+      const parentDocs = await Member.find({ _id: { $in: parents } });
+      for (const p of parentDocs) {
+        if (p.spouse) {
+          await Member.findByIdAndUpdate(p.spouse, { $addToSet: { children: member._id } });
+          await Member.findByIdAndUpdate(member._id, { $addToSet: { parents: p.spouse } });
+        }
+      }
+    }
+
+    // 🔔 Notification
+    await Notification.create({
+      user: req.user.id,
+      type: 'member_added',
+      message: `${name} was added to your family tree.`,
+      memberId: member._id,
+    });
+
     res.status(201).json(member);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
+// PUT — edit member
 router.put('/:id', protect, async (req, res) => {
   try {
-    const { $push_child, $push_parent, ...rest } = req.body;
-    let update = { ...rest };
+    const member = await Member.findOneAndUpdate(
+      { _id: req.params.id, user: req.user.id },
+      req.body,
+      { new: true }
+    );
+    if (!member) return res.status(404).json({ message: 'Member not found' });
 
-    if ($push_child) update = { ...update, $push: { children: $push_child } };
-    if ($push_parent) update = { ...update, $push: { parents: $push_parent } };
-
-    const member = await Member.findByIdAndUpdate(req.params.id, update, { new: true });
-
-    // ── Smart Inference ──────────────────────────────────────────
-    // If we just set a spouse, wire up children automatically
-    if (rest.spouse) {
-      const spouseId = rest.spouse;
-      const currentId = req.params.id;
-
-      // Get both members fresh
-      const [current, spouse] = await Promise.all([
-        Member.findById(currentId),
-        Member.findById(spouseId),
-      ]);
-
-      // Collect all children from both sides
-      const currentChildren = (current?.children || []).map(String);
-      const spouseChildren  = (spouse?.children  || []).map(String);
-      const allChildren = [...new Set([...currentChildren, ...spouseChildren])];
-
-      if (allChildren.length) {
-        // Add current member as parent to all spouse's children (if not already)
-        for (const childId of spouseChildren) {
-          if (!currentChildren.includes(childId)) {
-            await Member.findByIdAndUpdate(currentId, { $addToSet: { children: childId } });
-            await Member.findByIdAndUpdate(childId,   { $addToSet: { parents:  currentId } });
-          }
-        }
-
-        // Add spouse as parent to all current member's children (if not already)
-        for (const childId of currentChildren) {
-          if (!spouseChildren.includes(childId)) {
-            await Member.findByIdAndUpdate(spouseId, { $addToSet: { children: childId } });
-            await Member.findByIdAndUpdate(childId,  { $addToSet: { parents:  spouseId } });
-          }
-        }
-      }
-    }
-
-    // If we just added a child, also add current member as
-    // co-parent alongside their spouse (if any)
-    if ($push_child) {
-      const parent = await Member.findById(req.params.id);
-      if (parent?.spouse) {
-        const spouseId = String(parent.spouse);
-        const childId  = String($push_child);
-        await Member.findByIdAndUpdate(spouseId, { $addToSet: { children: childId } });
-        await Member.findByIdAndUpdate(childId,  { $addToSet: { parents:  spouseId } });
-      }
-    }
-    // ── End Inference ────────────────────────────────────────────
+    // 🔔 Notification
+    await Notification.create({
+      user: req.user.id,
+      type: 'member_edited',
+      message: `${member.name}'s details were updated.`,
+      memberId: member._id,
+    });
 
     res.json(member);
   } catch (err) {
@@ -143,17 +84,26 @@ router.put('/:id', protect, async (req, res) => {
   }
 });
 
+// DELETE — remove member
 router.delete('/:id', protect, async (req, res) => {
   try {
-    await Member.updateMany(
-      { $or: [{ children: req.params.id }, { parents: req.params.id }, { spouse: req.params.id }] },
-      { $pull: { children: req.params.id, parents: req.params.id }, $unset: { spouse: '' } }
-    );
-    await Member.findByIdAndDelete(req.params.id);
-    res.json({ message: 'Member deleted' });
+    const member = await Member.findOneAndDelete({ _id: req.params.id, user: req.user.id });
+    if (!member) return res.status(404).json({ message: 'Member not found' });
+
+    await Member.updateMany({ children: req.params.id }, { $pull: { children: req.params.id } });
+    await Member.updateMany({ parents:  req.params.id }, { $pull: { parents:  req.params.id } });
+    await Member.updateMany({ spouse:   req.params.id }, { $set:  { spouse:   null } });
+
+    // 🔔 Notification
+    await Notification.create({
+      user: req.user.id,
+      type: 'member_deleted',
+      message: `${member.name} was removed from your family tree.`,
+    });
+
+    res.json({ message: 'Deleted' });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
-
 export default router;

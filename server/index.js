@@ -6,6 +6,7 @@ import authRoutes from './routes/auth.js';
 import memberRoutes from './routes/members.js';
 import uploadRoutes from './routes/upload.js';
 import './jobs/birthdayJob.js';
+import notificationRoutes from './routes/notifications.js';
 
 dotenv.config();
 const app = express();
@@ -22,6 +23,7 @@ app.use(express.json());
 app.use('/api/auth', authRoutes);
 app.use('/api/members', memberRoutes);
 app.use('/api/upload', uploadRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 mongoose.connect(process.env.MONGO_URI)
   .then(() => {

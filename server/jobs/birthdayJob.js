@@ -1,10 +1,11 @@
 import cron from 'node-cron';
 import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 import Member from '../models/Member.js';
+import Notification from '../models/Notification.js';
 import dotenv from 'dotenv';
 dotenv.config();
 
-const ses = new SESClient({ region: process.env.S3_REGION || 'us-east-2' });
+const ses = new SESClient({ region: process.env.SES_REGION || 'us-east-2' });
 
 const sendEmail = async (to, subject, body) => {
   const command = new SendEmailCommand({
@@ -18,26 +19,29 @@ const sendEmail = async (to, subject, body) => {
   await ses.send(command);
 };
 
-// Runs every day at 8:00 AM
 cron.schedule('0 8 * * *', async () => {
   const today = new Date();
   const month = today.getMonth() + 1;
-  const day = today.getDate();
+  const day   = today.getDate();
 
   try {
-    const members = await Member.find({ email: { $exists: true, $ne: '' } });
+    const members = await Member.find({});
 
     for (const member of members) {
       // Birthday check
       if (member.dob) {
         const dob = new Date(member.dob);
         if (dob.getMonth() + 1 === month && dob.getDate() === day) {
-          await sendEmail(
-            member.email,
-            `🎂 Happy Birthday ${member.name}!`,
-            `Wishing ${member.name} a very Happy Birthday from CloudTree! 🌳`
-          );
-          console.log(`✅ Birthday email sent to ${member.name}`);
+          if (member.email) {
+            await sendEmail(member.email, `🎂 Happy Birthday ${member.name}!`,
+              `Wishing ${member.name} a very Happy Birthday from CloudTree! 🌳`);
+          }
+          await Notification.create({
+            user: member.user,
+            type: 'birthday',
+            message: `🎂 Today is ${member.name}'s birthday!`,
+            memberId: member._id,
+          });
         }
       }
 
@@ -45,12 +49,16 @@ cron.schedule('0 8 * * *', async () => {
       if (member.anniversary) {
         const ann = new Date(member.anniversary);
         if (ann.getMonth() + 1 === month && ann.getDate() === day) {
-          await sendEmail(
-            member.email,
-            `💍 Happy Anniversary ${member.name}!`,
-            `Wishing ${member.name} a wonderful Anniversary from CloudTree! 🌳`
-          );
-          console.log(`✅ Anniversary email sent to ${member.name}`);
+          if (member.email) {
+            await sendEmail(member.email, `💍 Happy Anniversary ${member.name}!`,
+              `Wishing ${member.name} a wonderful Anniversary from CloudTree! 🌳`);
+          }
+          await Notification.create({
+            user: member.user,
+            type: 'anniversary',
+            message: `💍 Today is ${member.name}'s anniversary!`,
+            memberId: member._id,
+          });
         }
       }
     }

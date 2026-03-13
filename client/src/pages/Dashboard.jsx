@@ -8,6 +8,7 @@ import { useTheme } from '../context/ThemeContext';
 import { toPng } from 'html-to-image';
 import StatsPanel from './StatsPanel';
 import { useReactFlow } from '@xyflow/react';
+import NotificationBell from '../components/NotificationBell';
 
 
 export default function Dashboard() {
@@ -136,6 +137,9 @@ const [showStats, setShowStats] = useState(false);
       </div>
       <span className="navbar-username" style={{ fontSize: '0.83rem', fontWeight: 600, color: 'var(--text-mid)' }}>{user.name}</span>
     </div>
+
+
+    <NotificationBell />
 
     <button onClick={toggle} title={dark ? 'Light mode' : 'Dark mode'}
       style={{ width: '36px', height: '36px', borderRadius: '10px', border: '1.5px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', fontSize: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
