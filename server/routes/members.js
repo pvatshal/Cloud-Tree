@@ -71,45 +71,86 @@ router.post('/', protect, async (req, res) => {
   }
 });
 // PUT — edit member
+// PUT /api/members/:id
 router.put('/:id', protect, async (req, res) => {
   try {
     const { $push_child, $push_parent, spouse, ...fields } = req.body;
 
-    // Handle $push_child — add a child to this member and wire back
+    // ── $push_child: add a child to this member ──────────────────────────────
     if ($push_child) {
+      const thisId = req.params.id;
+
+      // Wire this member ↔ child
       await Member.findOneAndUpdate(
-        { _id: req.params.id, userId: req.user.id },
+        { _id: thisId, userId: req.user.id },
         { $addToSet: { children: $push_child } }
       );
-      await Member.findByIdAndUpdate($push_child, { $addToSet: { parents: req.params.id } });
+      await Member.findByIdAndUpdate($push_child, { $addToSet: { parents: thisId } });
 
-      // Also wire spouse as co-parent
-      const thisM = await Member.findById(req.params.id);
+      // Wire this member's spouse as co-parent (if they have one)
+      const thisM = await Member.findById(thisId);
       if (thisM?.spouse) {
         await Member.findByIdAndUpdate(thisM.spouse, { $addToSet: { children: $push_child } });
         await Member.findByIdAndUpdate($push_child, { $addToSet: { parents: thisM.spouse } });
       }
-      return res.json({ success: true });
-    }
 
-    // Handle $push_parent — add a parent to this member and wire back
-    if ($push_parent) {
-      await Member.findOneAndUpdate(
-        { _id: req.params.id, userId: req.user.id },
-        { $addToSet: { parents: $push_parent } }
-      );
-      await Member.findByIdAndUpdate($push_parent, { $addToSet: { children: req.params.id } });
+      // KEY FIX: If the child already has another parent, auto-wire them as spouses
+      const child = await Member.findById($push_child);
+      const coParents = (child?.parents || [])
+        .map(p => String(p))
+        .filter(p => p !== String(thisId));
 
-      // Also wire parent's spouse as co-parent
-      const parentM = await Member.findById($push_parent);
-      if (parentM?.spouse) {
-        await Member.findByIdAndUpdate(parentM.spouse, { $addToSet: { children: req.params.id } });
-        await Member.findByIdAndUpdate(req.params.id, { $addToSet: { parents: parentM.spouse } });
+      if (coParents.length > 0 && !thisM?.spouse) {
+        const coParentId = coParents[0]; // take the first existing parent
+        const coParent = await Member.findById(coParentId);
+        // Only wire if neither has a spouse yet
+        if (!coParent?.spouse) {
+          await Member.findByIdAndUpdate(thisId, { spouse: coParentId });
+          await Member.findByIdAndUpdate(coParentId, { spouse: thisId });
+        }
       }
+
       return res.json({ success: true });
     }
 
-    // Handle spouse wiring
+    // ── $push_parent: add a parent to this member ────────────────────────────
+    if ($push_parent) {
+      const thisId   = req.params.id;
+      const parentId = $push_parent;
+
+      // Wire parent ↔ this member
+      await Member.findOneAndUpdate(
+        { _id: thisId, userId: req.user.id },
+        { $addToSet: { parents: parentId } }
+      );
+      await Member.findByIdAndUpdate(parentId, { $addToSet: { children: thisId } });
+
+      // Wire parent's spouse as co-parent (if they have one)
+      const parentM = await Member.findById(parentId);
+      if (parentM?.spouse) {
+        await Member.findByIdAndUpdate(parentM.spouse, { $addToSet: { children: thisId } });
+        await Member.findByIdAndUpdate(thisId, { $addToSet: { parents: parentM.spouse } });
+      }
+
+      // KEY FIX: If this member already has another parent, auto-wire them as spouses
+      const thisM = await Member.findById(thisId);
+      const coParents = (thisM?.parents || [])
+        .map(p => String(p))
+        .filter(p => p !== String(parentId));
+
+      if (coParents.length > 0 && !parentM?.spouse) {
+        const coParentId = coParents[0];
+        const coParent   = await Member.findById(coParentId);
+        if (!coParent?.spouse) {
+          await Member.findByIdAndUpdate(parentId,   { spouse: coParentId });
+          await Member.findByIdAndUpdate(coParentId, { spouse: parentId });
+        }
+      }
+
+      return res.json({ success: true });
+    }
+
+    // ── spouse: wire two members as married ──────────────────────────────────
     if (spouse !== undefined) {
       const member = await Member.findOneAndUpdate(
         { _id: req.params.id, userId: req.user.id },
@@ -119,22 +160,35 @@ router.put('/:id', protect, async (req, res) => {
       if (!member) return res.status(404).json({ message: 'Member not found' });
 
       if (spouse) {
-        // Wire spouse's children as co-parent
+        // Wire back
         await Member.findByIdAndUpdate(spouse, { spouse: req.params.id });
+
+        // Cross-wire children: each spouse inherits the other's children
         const spouseDoc = await Member.findById(spouse);
         if (spouseDoc?.children?.length) {
-          await Member.findByIdAndUpdate(req.params.id, { $addToSet: { children: { $each: spouseDoc.children } } });
-          await Member.updateMany({ _id: { $in: spouseDoc.children } }, { $addToSet: { parents: req.params.id } });
+          await Member.findByIdAndUpdate(req.params.id, {
+            $addToSet: { children: { $each: spouseDoc.children.map(String) } },
+          });
+          await Member.updateMany(
+            { _id: { $in: spouseDoc.children } },
+            { $addToSet: { parents: req.params.id } }
+          );
         }
         if (member.children?.length) {
-          await Member.findByIdAndUpdate(spouse, { $addToSet: { children: { $each: member.children } } });
-          await Member.updateMany({ _id: { $in: member.children } }, { $addToSet: { parents: spouse } });
+          await Member.findByIdAndUpdate(spouse, {
+            $addToSet: { children: { $each: member.children.map(String) } },
+          });
+          await Member.updateMany(
+            { _id: { $in: member.children } },
+            { $addToSet: { parents: spouse } }
+          );
         }
       }
+
       return res.json(member);
     }
 
-    // Regular field update (name, dob, photo, etc.)
+    // ── Regular field update (name, dob, photo, notes, etc.) ─────────────────
     const member = await Member.findOneAndUpdate(
       { _id: req.params.id, userId: req.user.id },
       fields,
@@ -143,9 +197,9 @@ router.put('/:id', protect, async (req, res) => {
     if (!member) return res.status(404).json({ message: 'Member not found' });
 
     await Notification.create({
-      user: req.user.id,
-      type: 'member_edited',
-      message: `${member.name}'s details were updated.`,
+      user:     req.user.id,
+      type:     'member_edited',
+      message:  `${member.name}'s details were updated.`,
       memberId: member._id,
     });
 
