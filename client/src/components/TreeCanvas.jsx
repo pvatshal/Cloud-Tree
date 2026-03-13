@@ -27,35 +27,39 @@ function buildLayout(members) {
   members.forEach(m => { byId[String(m._id)] = m; });
   const memberIdSet = new Set(members.map(m => String(m._id)));
 
-  // Step 1: BFS generations — parent→child only
+  // ── Step 1: BFS generation assignment ──────────────────────────────────────
+  // Only follow parent→child edges. Use max-gen (deepest wins) to handle
+  // cases where a person is reachable from multiple root paths.
   const genMap = {};
-  const roots = members.filter(m => !(m.parents || []).length);
+
+  const validParents = (m) =>
+    (m.parents || []).map(String).filter(p => memberIdSet.has(p));
+
+  const roots = members.filter(m => validParents(m).length === 0);
   if (!roots.length) roots.push(members[0]);
 
+  // BFS — allow revisiting with a higher generation
   const queue = roots.map(r => ({ id: String(r._id), gen: 0 }));
-  const visited = new Set();
-
   while (queue.length) {
     const { id, gen } = queue.shift();
-    if (visited.has(id)) continue;
-    visited.add(id);
+    if (genMap[id] !== undefined && genMap[id] >= gen) continue; // already at this gen or deeper
     genMap[id] = gen;
     const m = byId[id];
     if (!m) continue;
     (m.children || []).forEach(c => {
       const cId = String(c);
-      if (!visited.has(cId)) queue.push({ id: cId, gen: gen + 1 });
+      if (memberIdSet.has(cId)) queue.push({ id: cId, gen: gen + 1 });
     });
   }
 
-  // Step 2: Propagate spouse generations
+  // ── Step 2: Propagate spouse generations (iterative until stable) ──────────
   let changed = true;
   while (changed) {
     changed = false;
     members.forEach(m => {
-      const id = String(m._id);
+      const id  = String(m._id);
       const sid = m.spouse ? String(m.spouse) : null;
-      if (!sid) return;
+      if (!sid || !memberIdSet.has(sid)) return;
       if (genMap[id] !== undefined && genMap[sid] === undefined) {
         genMap[sid] = genMap[id]; changed = true;
       } else if (genMap[sid] !== undefined && genMap[id] === undefined) {
@@ -64,7 +68,7 @@ function buildLayout(members) {
     });
   }
 
-  // Step 3: Assign any remaining unvisited to gen 0
+  // ── Step 3: Assign any still-unvisited members to gen 0 ───────────────────
   members.forEach(m => {
     if (genMap[String(m._id)] === undefined) genMap[String(m._id)] = 0;
   });
@@ -76,29 +80,35 @@ function buildLayout(members) {
 
   const posMap = {};
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-  function unitWidth(unit) {
-    return unit.type === 'couple' ? NODE_W * 2 + H_GAP : NODE_W;
+  // ── Helpers ────────────────────────────────────────────────────────────────
+
+  // Return spouse ID only if spouse is in the same generation and in the tree
+  function spouseInGen(id, g) {
+    const m   = byId[id];
+    const sid = m?.spouse ? String(m.spouse) : null;
+    if (sid && memberIdSet.has(sid) && genMap[sid] === g) return sid;
+    return null;
   }
 
-  // Build couple-units from a list of IDs in generation g
+  // Build atomic units (couple = 2 nodes, single = 1 node) from a list of IDs
+  // all belonging to generation g.
   function buildUnits(ids, g) {
-    const seen = new Set();
+    const seen  = new Set();
     const units = [];
     ids.forEach(id => {
       if (seen.has(id)) return;
       seen.add(id);
-      const m = byId[id];
-      const sid = m?.spouse ? String(m.spouse) : null;
-      if (sid && genMap[sid] === g && !seen.has(sid)) {
+      const sid = spouseInGen(id, g);
+      if (sid && !seen.has(sid)) {
         seen.add(sid);
+        const m      = byId[id];
         const spouse = byId[sid];
-        // Male first, female second
-        if (m.gender === 'female' && spouse?.gender === 'male') {
-          units.push({ type: 'couple', ids: [sid, id] });
-        } else {
-          units.push({ type: 'couple', ids: [id, sid] });
-        }
+        // Prefer male-first ordering
+        const malefirst =
+          m?.gender === 'female' && spouse?.gender === 'male'
+            ? [sid, id]
+            : [id, sid];
+        units.push({ type: 'couple', ids: malefirst });
       } else {
         units.push({ type: 'single', ids: [id] });
       }
@@ -106,7 +116,19 @@ function buildLayout(members) {
     return units;
   }
 
-  // Place units starting at startX on row y
+  function unitWidth(unit) {
+    return unit.type === 'couple' ? NODE_W * 2 + H_GAP : NODE_W;
+  }
+
+  function totalUnitsWidth(units) {
+    if (!units.length) return 0;
+    return (
+      units.reduce((acc, u) => acc + unitWidth(u), 0) +
+      Math.max(0, units.length - 1) * H_GAP
+    );
+  }
+
+  // Place units left-to-right starting at startX on row y
   function placeUnits(units, startX, y) {
     let x = startX;
     units.forEach((unit, i) => {
@@ -116,199 +138,210 @@ function buildLayout(members) {
       } else {
         posMap[unit.ids[0]] = { x, y };
       }
-      x += unitWidth(unit) + (i < units.length - 1 ? H_GAP * 1.5 : 0);
+      x += unitWidth(unit) + (i < units.length - 1 ? H_GAP : 0);
     });
   }
 
-  function totalUnitsWidth(units) {
-    return units.reduce((acc, u, i) =>
-      acc + unitWidth(u) + (i < units.length - 1 ? H_GAP * 1.5 : 0), 0);
-  }
-
-  // Step 4: Initial layout — place couple-units side by side per generation
-  for (let g = 0; g <= maxGen; g++) {
+  // Bidirectional collision resolution for generation g — run multiple passes
+  function resolveCollisions(g) {
     const ids = genGroups[g];
-    if (!ids.length) continue;
-    const units = buildUnits(ids, g);
-    const totalW = totalUnitsWidth(units);
-    const y = g * (NODE_H + V_GAP);
-    placeUnits(units, -totalW / 2, y);
-  }
+    if (ids.length < 2) return;
 
-  // Step 5: Re-center children (as atomic couple-units) under their parents
-  // Singles go LEFT of couples so a single sibling never sits between a married couple
-  const repositionedAsCouple = new Set();
+    const MIN_GAP = H_GAP * 0.8; // minimum gap between any two nodes
 
-  for (let g = maxGen; g >= 1; g--) {
-    const ids = genGroups[g];
-    const seenSibGroup = new Set();
-    const siblingGroups = [];
-
+    // Build couple-partner map for atomic shifting
+    const coupleOf = {};
     ids.forEach(id => {
-      if (seenSibGroup.has(id)) return;
-      const m = byId[id];
-      const parents = (m?.parents || []).map(String).filter(p => memberIdSet.has(p));
-      if (!parents.length) return;
-
-      const siblings = ids.filter(sid => {
-        const sp = (byId[sid]?.parents || []).map(String);
-        return parents.some(p => sp.includes(p));
-      });
-      siblings.forEach(s => seenSibGroup.add(s));
-      siblingGroups.push({ parents, siblings });
+      const sid = spouseInGen(id, g);
+      if (sid) { coupleOf[id] = sid; coupleOf[sid] = id; }
     });
 
-    siblingGroups.forEach(({ parents, siblings }) => {
-      // Skip siblings already locked in as part of a couple from another sibling group
-      const activeSiblings = siblings.filter(id => !repositionedAsCouple.has(id));
-      if (!activeSiblings.length) return;
-
-      // Build couple-units — a sibling's spouse may be from a different family
-      const units = buildUnits(activeSiblings, g);
-
-      // Sort: singles LEFT, couples RIGHT
-      // This prevents a single sibling from landing between a married couple
-      units.sort((a, b) => {
-        if (a.type === 'single' && b.type === 'couple') return -1;
-        if (a.type === 'couple' && b.type === 'single') return 1;
-        return 0;
-      });
-
-      // Lock couple members so they aren't repositioned by another sibling group
-      units.forEach(u => {
-        if (u.type === 'couple') {
-          repositionedAsCouple.add(u.ids[0]);
-          repositionedAsCouple.add(u.ids[1]);
+    for (let pass = 0; pass < 5; pass++) {
+      // ── Left-to-right pass: push right ──────────────────────────────────
+      const ltr = [...ids].sort((a, b) => (posMap[a]?.x || 0) - (posMap[b]?.x || 0));
+      for (let i = 1; i < ltr.length; i++) {
+        const prev = ltr[i - 1];
+        const curr = ltr[i];
+        if (!posMap[prev] || !posMap[curr]) continue;
+        const gap = posMap[curr].x - (posMap[prev].x + NODE_W);
+        if (gap < MIN_GAP) {
+          const shift = MIN_GAP - gap;
+          posMap[curr].x += shift;
+          // Shift partner atomically
+          const partner = coupleOf[curr];
+          if (partner && posMap[partner] && posMap[partner].x > posMap[curr].x) {
+            posMap[partner].x += shift;
+          }
         }
-      });
-
-      const parentPos = parents.map(p => posMap[p]).filter(Boolean);
-      if (!parentPos.length) return;
-
-      const parentCenterX =
-        parentPos.reduce((s, p) => s + p.x + NODE_W / 2, 0) / parentPos.length;
-
-      const totalW = totalUnitsWidth(units);
-      const startX = parentCenterX - totalW / 2;
-      const y = g * (NODE_H + V_GAP);
-
-      placeUnits(units, startX, y);
-    });
-  }
-
-  // Step 5b: Re-center parent couples above their children's final positions
-  // This ensures e.g. Arpan+Kinnari slide above Drashti's final spot
-  for (let g = 0; g < maxGen; g++) {
-    const ids = genGroups[g];
-    const seenParent = new Set();
-
-    ids.forEach(id => {
-      if (seenParent.has(id)) return;
-      seenParent.add(id);
-
-      const m = byId[id];
-      const sid = m?.spouse ? String(m.spouse) : null;
-      const isCouple = sid && genMap[sid] === g && memberIdSet.has(sid);
-      if (isCouple) seenParent.add(sid);
-
-      // Collect all children of this parent (or couple)
-      const parentIds = isCouple ? [id, sid] : [id];
-      const childrenSet = new Set();
-      parentIds.forEach(pid => {
-        (byId[pid]?.children || []).forEach(cId => {
-          const cStr = String(cId);
-          if (memberIdSet.has(cStr)) childrenSet.add(cStr);
-        });
-      });
-
-      if (!childrenSet.size) return;
-
-      const childPos = [...childrenSet].map(c => posMap[c]).filter(Boolean);
-      if (!childPos.length) return;
-
-      const childMinX = Math.min(...childPos.map(p => p.x));
-      const childMaxX = Math.max(...childPos.map(p => p.x + NODE_W));
-      const childCenterX = (childMinX + childMaxX) / 2;
-      const y = g * (NODE_H + V_GAP);
-
-      if (isCouple) {
-        const coupleW = NODE_W * 2 + H_GAP;
-        const startX = childCenterX - coupleW / 2;
-        const spouse = byId[sid];
-        if (m.gender === 'female' && spouse?.gender === 'male') {
-          posMap[sid] = { x: startX, y };
-          posMap[id]  = { x: startX + NODE_W + H_GAP, y };
-        } else {
-          posMap[id]  = { x: startX, y };
-          posMap[sid] = { x: startX + NODE_W + H_GAP, y };
-        }
-      } else {
-        posMap[id] = { x: childCenterX - NODE_W / 2, y };
       }
-    });
-  }
 
-  // Step 5c: Collision resolution — push overlapping nodes apart per generation
-  const MIN_GAP = H_GAP * 1.5;
-
-  for (let g = 0; g <= maxGen; g++) {
-    const ids = genGroups[g];
-    if (ids.length < 2) continue;
-
-    // Sort all ids in this generation by their current x position
-    const sorted = [...ids].sort((a, b) => (posMap[a]?.x || 0) - (posMap[b]?.x || 0));
-
-    // Build couple awareness so we move couples as atomic units
-    const coupleOf = {}; // id → partner id
-    sorted.forEach(id => {
-      const m = byId[id];
-      const sid = m?.spouse ? String(m.spouse) : null;
-      if (sid && genMap[sid] === g && memberIdSet.has(sid)) {
-        coupleOf[id] = sid;
-        coupleOf[sid] = id;
-      }
-    });
-
-    // Iteratively push nodes right if they overlap with previous node
-    for (let i = 1; i < sorted.length; i++) {
-      const prev = sorted[i - 1];
-      const curr = sorted[i];
-      if (!posMap[prev] || !posMap[curr]) continue;
-
-      const prevRight = posMap[prev].x + NODE_W;
-      const currLeft  = posMap[curr].x;
-      const overlap   = prevRight + MIN_GAP - currLeft;
-
-      if (overlap > 0) {
-        // Push curr (and its spouse if coupled) to the right
-        posMap[curr].x += overlap;
-        const partner = coupleOf[curr];
-        if (partner && posMap[partner] && posMap[partner].x > posMap[curr].x) {
-          posMap[partner].x += overlap;
+      // ── Right-to-left pass: push left ───────────────────────────────────
+      const rtl = [...ltr].reverse();
+      for (let i = 1; i < rtl.length; i++) {
+        const prev = rtl[i - 1]; // rightmost processed
+        const curr = rtl[i];
+        if (!posMap[prev] || !posMap[curr]) continue;
+        const gap = posMap[prev].x - (posMap[curr].x + NODE_W);
+        if (gap < MIN_GAP) {
+          const shift = MIN_GAP - gap;
+          posMap[curr].x -= shift;
+          // Shift partner atomically
+          const partner = coupleOf[curr];
+          if (partner && posMap[partner] && posMap[partner].x < posMap[curr].x) {
+            posMap[partner].x -= shift;
+          }
         }
       }
     }
   }
 
-  // Step 6: Build ReactFlow nodes
+  // Re-center parent unit above its children's bounding box
+  function recenterParentAboveChildren(unit, g) {
+    const y = g * (NODE_H + V_GAP);
+
+    // Collect all children belonging to any member of this unit
+    const childrenSet = new Set();
+    unit.ids.forEach(pid => {
+      (byId[pid]?.children || []).forEach(cId => {
+        const cs = String(cId);
+        if (memberIdSet.has(cs)) childrenSet.add(cs);
+      });
+    });
+    if (!childrenSet.size) return;
+
+    const childPos = [...childrenSet].map(c => posMap[c]).filter(Boolean);
+    if (!childPos.length) return;
+
+    const childMinX   = Math.min(...childPos.map(p => p.x));
+    const childMaxX   = Math.max(...childPos.map(p => p.x + NODE_W));
+    const childCenterX = (childMinX + childMaxX) / 2;
+
+    if (unit.type === 'couple') {
+      const coupleW  = NODE_W * 2 + H_GAP;
+      const startX   = childCenterX - coupleW / 2;
+      posMap[unit.ids[0]] = { x: startX,              y };
+      posMap[unit.ids[1]] = { x: startX + NODE_W + H_GAP, y };
+    } else {
+      posMap[unit.ids[0]] = { x: childCenterX - NODE_W / 2, y };
+    }
+  }
+
+  // ── Step 4: Initial placement — center each generation ─────────────────────
+  for (let g = 0; g <= maxGen; g++) {
+    const ids = genGroups[g];
+    if (!ids.length) continue;
+    const units  = buildUnits(ids, g);
+    const totalW = totalUnitsWidth(units);
+    const y      = g * (NODE_H + V_GAP);
+    placeUnits(units, -totalW / 2, y);
+  }
+
+  // ── Step 5: Bottom-up sibling placement ───────────────────────────────────
+  // For each generation (deepest first), group children by shared parents,
+  // build couple-units within the sibling group (singles left, couples right),
+  // and center the group under its parents.
+  const lockedByCouple = new Set(); // IDs already positioned as part of a couple unit
+
+  for (let g = maxGen; g >= 1; g--) {
+    const ids = genGroups[g];
+    const y   = g * (NODE_H + V_GAP);
+
+    // Identify sibling groups
+    const seenSib      = new Set();
+    const siblingGroups = [];
+
+    ids.forEach(id => {
+      if (seenSib.has(id)) return;
+      const m       = byId[id];
+      const parents = (m?.parents || [])
+        .map(String)
+        .filter(p => memberIdSet.has(p) && genMap[p] < g); // parent must be above
+
+      if (!parents.length) {
+        seenSib.add(id); // floating — leave at initial position
+        return;
+      }
+
+      // Gather all siblings (share ≥1 parent)
+      const siblings = ids.filter(s2 => {
+        const sp2 = (byId[s2]?.parents || []).map(String);
+        return parents.some(p => sp2.includes(p));
+      });
+      siblings.forEach(s => seenSib.add(s));
+      siblingGroups.push({ parents, siblings });
+    });
+
+    siblingGroups.forEach(({ parents, siblings }) => {
+      // Only use siblings not already locked as part of another couple
+      const active = siblings.filter(id => !lockedByCouple.has(id));
+      if (!active.length) return;
+
+      // Build units — singles LEFT, couples RIGHT
+      const units = buildUnits(active, g);
+      units.sort((a, b) => {
+        if (a.type === 'single' && b.type === 'couple') return -1;
+        if (a.type === 'couple' && b.type === 'single') return  1;
+        return 0;
+      });
+
+      // Lock all couple members to prevent double-processing
+      units.forEach(u => {
+        if (u.type === 'couple') u.ids.forEach(id => lockedByCouple.add(id));
+      });
+
+      // Find parent center
+      const parentPos = parents.map(p => posMap[p]).filter(Boolean);
+      if (!parentPos.length) return;
+
+      const parentMinX    = Math.min(...parentPos.map(p => p.x));
+      const parentMaxX    = Math.max(...parentPos.map(p => p.x + NODE_W));
+      const parentCenterX = (parentMinX + parentMaxX) / 2;
+
+      const totalW = totalUnitsWidth(units);
+      placeUnits(units, parentCenterX - totalW / 2, y);
+    });
+
+    // Resolve collisions within this generation after placement
+    resolveCollisions(g);
+  }
+
+  // ── Step 6: Top-down parent re-centering ──────────────────────────────────
+  // After children are placed, re-center each parent couple/single above its
+  // children. Process shallowest generation first so re-centering cascades down.
+  for (let g = 0; g < maxGen; g++) {
+    const ids   = genGroups[g];
+    const units = buildUnits(ids, g);
+
+    units.forEach(unit => recenterParentAboveChildren(unit, g));
+
+    // After re-centering parents, resolve collisions at this level
+    resolveCollisions(g);
+  }
+
+  // ── Step 7: Final collision sweep on ALL generations ──────────────────────
+  // Run a final global sweep to catch any remaining overlaps caused by
+  // the interplay between bottom-up and top-down passes.
+  for (let g = 0; g <= maxGen; g++) resolveCollisions(g);
+
+  // ── Step 8: Build ReactFlow nodes ─────────────────────────────────────────
   const nodes = members.map(m => ({
-    id: String(m._id),
-    type: 'memberNode',
+    id:       String(m._id),
+    type:     'memberNode',
     position: posMap[String(m._id)] || { x: 0, y: 0 },
-    data: { member: m, onEdit: null, onDelete: null },
+    data:     { member: m, onEdit: null, onDelete: null },
   }));
 
-  // Step 7: Build edges
+  // ── Step 9: Build edges ───────────────────────────────────────────────────
   const parentEdges = members.flatMap(m =>
     (m.children || [])
       .map(String)
       .filter(cId => memberIdSet.has(cId))
       .map(cId => ({
-        id: `parent-${String(m._id)}-${cId}`,
-        source: String(m._id),
-        target: cId,
-        type: 'smoothstep',
-        style: { stroke: '#4ade80', strokeWidth: 1.8, opacity: 0.85 },
+        id:        `parent-${String(m._id)}-${cId}`,
+        source:    String(m._id),
+        target:    cId,
+        type:      'smoothstep',
+        style:     { stroke: '#4ade80', strokeWidth: 1.8, opacity: 0.85 },
         markerEnd: { type: 'arrowclosed', color: '#4ade80', width: 16, height: 16 },
       }))
   );
@@ -323,16 +356,16 @@ function buildLayout(members) {
       return true;
     })
     .map(m => ({
-      id: `spouse-${[String(m._id), String(m.spouse)].sort().join('-')}`,
-      source: String(m._id),
-      target: String(m.spouse),
+      id:           `spouse-${[String(m._id), String(m.spouse)].sort().join('-')}`,
+      source:       String(m._id),
+      target:       String(m.spouse),
       sourceHandle: 'right',
       targetHandle: 'left',
-      type: 'straight',
-      animated: true,
-      style: { stroke: '#fbbf24', strokeWidth: 1.8, opacity: 0.85, strokeDasharray: '6 3' },
-      label: '💍',
-      labelStyle: { fontSize: 12, fontFamily: 'DM Sans, sans-serif' },
+      type:         'straight',
+      animated:     true,
+      style:        { stroke: '#fbbf24', strokeWidth: 1.8, opacity: 0.85, strokeDasharray: '6 3' },
+      label:        '💍',
+      labelStyle:   { fontSize: 12, fontFamily: 'DM Sans, sans-serif' },
       labelBgStyle: { fill: 'transparent' },
     }));
 
