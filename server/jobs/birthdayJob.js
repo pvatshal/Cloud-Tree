@@ -37,7 +37,7 @@ cron.schedule('0 8 * * *', async () => {
               `Wishing ${member.name} a very Happy Birthday from CloudTree! 🌳`);
           }
           await Notification.create({
-            user: member.user,
+            user: member.userId,
             type: 'birthday',
             message: `🎂 Today is ${member.name}'s birthday!`,
             memberId: member._id,
@@ -54,7 +54,7 @@ cron.schedule('0 8 * * *', async () => {
               `Wishing ${member.name} a wonderful Anniversary from CloudTree! 🌳`);
           }
           await Notification.create({
-            user: member.user,
+            user: member.userId,
             type: 'anniversary',
             message: `💍 Today is ${member.name}'s anniversary!`,
             memberId: member._id,

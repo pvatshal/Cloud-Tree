@@ -6,19 +6,15 @@ import Notification from '../models/Notification.js';
 const router = express.Router();
 
 router.get('/', protect, async (req, res) => {
-  try {
-    const members = await Member.find({ userId: req.user.id });
-    res.json(members);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
+  const members = await Member.find({ userId: req.user.id });
+  res.json(members);
 });
 // POST — add member
 router.post('/', protect, async (req, res) => {
   try {
     const { name, gender, dob, anniversary, email, phone, notes, photo, parents, children, spouse } = req.body;
     const member = await Member.create({
-      user: req.user.id, name, gender, dob, anniversary, email, phone, notes, photo,
+      userId: req.user.id, name, gender, dob, anniversary, email, phone, notes, photo,
       parents: parents || [], children: children || [], spouse: spouse || null,
     });
 
@@ -64,7 +60,7 @@ router.post('/', protect, async (req, res) => {
 router.put('/:id', protect, async (req, res) => {
   try {
     const member = await Member.findOneAndUpdate(
-      { _id: req.params.id, user: req.user.id },
+      { _id: req.params.id, userId: req.user.id },
       req.body,
       { new: true }
     );
@@ -87,7 +83,7 @@ router.put('/:id', protect, async (req, res) => {
 // DELETE — remove member
 router.delete('/:id', protect, async (req, res) => {
   try {
-    const member = await Member.findOneAndDelete({ _id: req.params.id, user: req.user.id });
+    const member = await Member.findOneAndDelete({ _id: req.params.id, userId: req.user.id });
     if (!member) return res.status(404).json({ message: 'Member not found' });
 
     await Member.updateMany({ children: req.params.id }, { $pull: { children: req.params.id } });
