@@ -13,26 +13,27 @@ router.get('/', protect, async (req, res) => {
 router.post('/', protect, async (req, res) => {
   try {
     const { name, gender, dob, anniversary, email, phone, notes, photo, parents, children, spouse } = req.body;
+    
     const member = await Member.create({
       userId: req.user.id, name, gender, dob, anniversary, email, phone, notes, photo,
       parents: parents || [], children: children || [], spouse: spouse || null,
     });
 
-    // Smart relationship inference (existing logic)
-    if (spouse) {
-      await Member.findByIdAndUpdate(spouse, { spouse: member._id });
-      const spouseDoc = await Member.findById(spouse);
-      if (spouseDoc?.children?.length) {
-        await Member.findByIdAndUpdate(member._id, { $addToSet: { children: { $each: spouseDoc.children } } });
-        await Member.updateMany({ _id: { $in: spouseDoc.children } }, { $addToSet: { parents: member._id } });
-      }
-      if (member.children?.length) {
-        await Member.findByIdAndUpdate(spouse, { $addToSet: { children: { $each: member.children } } });
-        await Member.updateMany({ _id: { $in: member.children } }, { $addToSet: { parents: spouse } });
-      }
+    // Wire children → update their parents array to include new member
+    if (children?.length) {
+      await Member.updateMany(
+        { _id: { $in: children } },
+        { $addToSet: { parents: member._id } }
+      );
     }
+
+    // Wire parents → update their children array to include new member
     if (parents?.length) {
-      await Member.updateMany({ _id: { $in: parents } }, { $addToSet: { children: member._id } });
+      await Member.updateMany(
+        { _id: { $in: parents } },
+        { $addToSet: { children: member._id } }
+      );
+      // Also wire parent's spouse as co-parent
       const parentDocs = await Member.find({ _id: { $in: parents } });
       for (const p of parentDocs) {
         if (p.spouse) {
@@ -42,7 +43,21 @@ router.post('/', protect, async (req, res) => {
       }
     }
 
-    // 🔔 Notification
+    // Wire spouse
+    if (spouse) {
+      await Member.findByIdAndUpdate(spouse, { spouse: member._id });
+      const spouseDoc = await Member.findById(spouse);
+      if (spouseDoc?.children?.length) {
+        await Member.findByIdAndUpdate(member._id, { $addToSet: { children: { $each: spouseDoc.children } } });
+        await Member.updateMany({ _id: { $in: spouseDoc.children } }, { $addToSet: { parents: member._id } });
+      }
+      if (children?.length) {
+        await Member.findByIdAndUpdate(spouse, { $addToSet: { children: { $each: children } } });
+        await Member.updateMany({ _id: { $in: children } }, { $addToSet: { parents: spouse } });
+      }
+    }
+
+    // Notification
     await Notification.create({
       user: req.user.id,
       type: 'member_added',
@@ -55,7 +70,6 @@ router.post('/', protect, async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
-
 // PUT — edit member
 router.put('/:id', protect, async (req, res) => {
   try {
