@@ -9,6 +9,7 @@ import { toPng } from 'html-to-image';
 import StatsPanel from './StatsPanel';
 import { useReactFlow } from '@xyflow/react';
 import NotificationBell from '../components/NotificationBell';
+import ShareModal from '../components/ShareModal';
 
 
 export default function Dashboard() {
@@ -22,6 +23,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem('user') || '{}');
 const [showStats, setShowStats] = useState(false);
+const [showShare, setShowShare] = useState(false);
 
 
 
@@ -156,6 +158,12 @@ const [showStats, setShowStats] = useState(false);
         style={{ width: '36px', height: '36px', borderRadius: '10px', border: '1.5px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', fontSize: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
       >🖼️</button>
     )}
+<button
+  onClick={() => setShowShare(true)}
+  style={{ padding: '0.5rem 1rem', borderRadius: '10px', border: '1.5px solid #16a34a', background: 'transparent', color: 'var(--forest)', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontSize: '0.85rem' }}
+>
+  🌐 Share
+</button>
 
     <button className="btn-primary" onClick={() => setShowAddModal(true)}
       style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.5rem 1.1rem', background: 'var(--btn-grad)', color: 'white', border: 'none', borderRadius: '10px', fontSize: '0.88rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', boxShadow: 'var(--btn-shadow)', flexShrink: 0 }}>
@@ -203,6 +211,7 @@ const [showStats, setShowStats] = useState(false);
       {editMember && <EditMemberModal member={editMember} onClose={() => setEditMember(null)} onUpdated={refetch} />}
     
     {showStats && <StatsPanel members={members} onClose={() => setShowStats(false)} />}
+{showShare && <ShareModal onClose={() => setShowShare(false)} />}
 
     </div>
   );

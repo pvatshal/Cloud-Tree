@@ -7,6 +7,9 @@ import memberRoutes from './routes/members.js';
 import uploadRoutes from './routes/upload.js';
 import './jobs/birthdayJob.js';
 import notificationRoutes from './routes/notifications.js';
+import shareRoutes  from './routes/share.js';
+import publicRoutes from './routes/public.js';
+
 
 dotenv.config();
 const app = express();
@@ -22,6 +25,8 @@ app.use(express.json());
 
 app.use('/api/auth', authRoutes);
 app.use('/api/members', memberRoutes);
+app.use('/api/share',  shareRoutes);
+app.use('/api/public', publicRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/notifications', notificationRoutes);
 
