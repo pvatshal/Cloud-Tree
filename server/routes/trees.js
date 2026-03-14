@@ -1,5 +1,4 @@
 import express from 'express';
-import TreeCollaborator from '../models/Treecollaborator.js';
 import User from '../models/User.js';
 import Member from '../models/Member.js';
 import { protect } from '../middleware/authMiddleware.js';
