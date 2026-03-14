@@ -23,6 +23,8 @@ services:
       S3_BUCKET: ${S3_BUCKET}
       S3_REGION: ${S3_REGION}
       SES_REGION: ${SES_REGION}
+      APP_URL: ${APP_URL}
+      SNS_INVITE_TOPIC: ${SNS_INVITE_TOPIC}
     depends_on:
       - mongo
     networks:
