@@ -10,6 +10,7 @@ import StatsPanel from './StatsPanel';
 import { useReactFlow } from '@xyflow/react';
 import NotificationBell from '../components/NotificationBell';
 import ShareModal from '../components/ShareModal';
+import InviteModal from '../components/InviteModal';
 
 
 export default function Dashboard() {
@@ -27,6 +28,7 @@ const [showShare, setShowShare] = useState(false);
 const [trees, setTrees] = useState([]);
 const [activeTreeOwner, setActiveTreeOwner] = useState(null); // null = my own tree
 const [activeRole, setActiveRole] = useState('owner');
+const [showInvite, setShowInvite] = useState(false);
 
 const refetch = () => {
   const url = activeTreeOwner ? `/members?treeOwner=${activeTreeOwner}` : '/members';
@@ -195,6 +197,14 @@ useEffect(() => { refetch().catch(() => navigate('/login')); }, [activeTreeOwner
         style={{ width: '36px', height: '36px', borderRadius: '10px', border: '1.5px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', fontSize: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
       >🖼️</button>
     )}
+
+<button
+  onClick={() => setShowInvite(true)}
+  style={{ padding:'0.5rem 1rem', borderRadius:'10px', border:'1.5px solid #3b82f6', background:'transparent', color:'#3b82f6', fontWeight:600, cursor:'pointer', fontFamily:'DM Sans, sans-serif', fontSize:'0.85rem' }}
+>
+  👥 Invite
+</button>
+
 <button
   onClick={() => setShowShare(true)}
   style={{ padding: '0.5rem 1rem', borderRadius: '10px', border: '1.5px solid #16a34a', background: 'transparent', color: 'var(--forest)', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontSize: '0.85rem' }}
@@ -250,6 +260,7 @@ useEffect(() => { refetch().catch(() => navigate('/login')); }, [activeTreeOwner
     
     {showStats && <StatsPanel members={members} onClose={() => setShowStats(false)} />}
 {showShare && <ShareModal onClose={() => setShowShare(false)} />}
+{showInvite && <InviteModal onClose={() => setShowInvite(false)} />}
 
     </div>
   );
