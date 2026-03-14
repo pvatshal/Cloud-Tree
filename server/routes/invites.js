@@ -3,8 +3,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { SNSClient, PublishCommand } from '@aws-sdk/client-sns';
 import User from '../models/User.js';
 import { protect } from '../middleware/authMiddleware.js';
-import Treeinvite from '../models/Treeinvite.js';
-import Treecollaborator from '../models/Treecollaborator.js';
+import TreeInvite from '../models/TreeInvite.js';
+import TreeCollaborator from '../models/TreeCollaborator.js';
 
 const router = express.Router();
 const sns = new SNSClient({ region: process.env.SES_REGION || 'us-east-2' });
