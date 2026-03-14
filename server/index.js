@@ -9,7 +9,9 @@ import './jobs/birthdayJob.js';
 import notificationRoutes from './routes/notifications.js';
 import shareRoutes  from './routes/share.js';
 import publicRoutes from './routes/public.js';
-
+import inviteRoutes       from './routes/invites.js';
+import collaboratorRoutes from './routes/collaborators.js';
+import treeRoutes         from './routes/trees.js';
 
 dotenv.config();
 const app = express();
@@ -29,7 +31,9 @@ app.use('/api/share',  shareRoutes);
 app.use('/api/public', publicRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/notifications', notificationRoutes);
-
+app.use('/api/invites',       inviteRoutes);
+app.use('/api/collaborators', collaboratorRoutes);
+app.use('/api/trees',         treeRoutes);
 mongoose.connect(process.env.MONGO_URI)
   .then(() => {
     console.log('✅ MongoDB connected');
