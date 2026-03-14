@@ -2,12 +2,27 @@ import express from 'express';
 import Member from '../models/Member.js';
 import { protect } from '../middleware/authMiddleware.js';
 import Notification from '../models/Notification.js';
+import TreeCollaborator from '../models/TreeCollaborator.js';
 
 const router = express.Router();
 
 router.get('/', protect, async (req, res) => {
-  const members = await Member.find({ userId: req.user.id });
-  res.json(members);
+  try {
+    const { treeOwner } = req.query;
+    if (treeOwner && treeOwner !== String(req.user.id)) {
+      // Verify requester is a collaborator on that tree
+      const collab = await TreeCollaborator.findOne({
+        treeOwnerId: treeOwner,
+        userId: req.user.id,
+      });
+      if (!collab) return res.status(403).json({ message: 'Access denied' });
+    }
+    const ownerId = treeOwner || req.user.id;
+    const members = await Member.find({ userId: ownerId });
+    res.json(members);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 });
 // POST — add member
 router.post('/', protect, async (req, res) => {

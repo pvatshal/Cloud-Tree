@@ -24,12 +24,28 @@ export default function Dashboard() {
   const user = JSON.parse(localStorage.getItem('user') || '{}');
 const [showStats, setShowStats] = useState(false);
 const [showShare, setShowShare] = useState(false);
+const [trees, setTrees] = useState([]);
+const [activeTreeOwner, setActiveTreeOwner] = useState(null); // null = my own tree
+const [activeRole, setActiveRole] = useState('owner');
 
+const refetch = () => {
+  const url = activeTreeOwner ? `/members?treeOwner=${activeTreeOwner}` : '/members';
+  return API.get(url).then(res => setMembers(res.data));
+};
 
+const fetchTrees = () => API.get('/trees').then(r => {
+  setTrees(r.data);
+  // Auto-switch to invited tree if redirected from AcceptInvite
+  const switchTo = sessionStorage.getItem('switchToTree');
+  if (switchTo) {
+    const tree = r.data.find(t => String(t.ownerId) === switchTo);
+    if (tree) { setActiveTreeOwner(tree.ownerId); setActiveRole(tree.role); }
+    sessionStorage.removeItem('switchToTree');
+  }
+});
 
-  const refetch = () => API.get('/members').then(res => setMembers(res.data));
-  useEffect(() => { refetch().catch(() => navigate('/login')); }, []);
-
+useEffect(() => { fetchTrees(); }, []);
+useEffect(() => { refetch().catch(() => navigate('/login')); }, [activeTreeOwner]);
   const handleLogout = () => { localStorage.clear(); navigate('/login'); };
   const handleDelete = async (id) => {
     if (!window.confirm('Remove this member from the tree?')) return;
@@ -90,6 +106,27 @@ const [showShare, setShowShare] = useState(false);
     <span style={{ fontFamily: 'Playfair Display, serif', fontSize: '1.3rem', color: 'var(--forest)', fontWeight: 700 }}>CloudTree</span>
   </div>
 
+
+{trees.length > 1 && (
+  <select
+    value={activeTreeOwner || 'mine'}
+    onChange={e => {
+      const val = e.target.value;
+      if (val === 'mine') { setActiveTreeOwner(null); setActiveRole('owner'); }
+      else {
+        const t = trees.find(t => String(t.ownerId) === val);
+        setActiveTreeOwner(val); setActiveRole(t?.role || 'viewer');
+      }
+    }}
+    style={{ padding: '0.5rem 0.75rem', borderRadius: '10px', border: '1.5px solid var(--border)', background: 'var(--bg-input)', fontSize: '0.85rem', color: 'var(--text-dark)', fontFamily: 'DM Sans, sans-serif', cursor: 'pointer', outline: 'none', flexShrink: 0, maxWidth: '180px' }}
+  >
+    {trees.map(t => (
+      <option key={t.ownerId} value={t.ownerId === (activeTreeOwner || trees[0]?.ownerId) && !activeTreeOwner ? 'mine' : String(t.ownerId)}>
+        {t.role === 'owner' ? `🌳 My Tree` : `👁 ${t.ownerName}'s Tree`} ({t.memberCount})
+      </option>
+    ))}
+  </select>
+)}
   {/* Search bar */}
   <div className="navbar-search" style={{ flex: 1, maxWidth: '360px', position: 'relative' }}>
     <span style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', fontSize: '0.9rem', pointerEvents: 'none' }}>🔍</span>
@@ -164,13 +201,14 @@ const [showShare, setShowShare] = useState(false);
 >
   🌐 Share
 </button>
-
+{activeRole !== 'viewer' && (
     <button className="btn-primary" onClick={() => setShowAddModal(true)}
       style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.5rem 1.1rem', background: 'var(--btn-grad)', color: 'white', border: 'none', borderRadius: '10px', fontSize: '0.88rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', boxShadow: 'var(--btn-shadow)', flexShrink: 0 }}>
       <span style={{ fontSize: '1rem' }}>+</span>
       <span className="navbar-username">Add Member</span>
       <span className="navbar-username" style={{ display: 'none' }}></span>
     </button>
+)}
 
     <button onClick={handleLogout}
       style={{ width: '36px', height: '36px', borderRadius: '10px', border: '1.5px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', fontSize: '0.85rem', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-soft)' }}
@@ -193,11 +231,11 @@ const [showShare, setShowShare] = useState(false);
             </button>
           </div>
         ) : viewMode === 'tree' ? (
-          <TreeCanvas
-            members={search || filterGender !== 'all' ? filtered : members}
-            onEdit={setEditMember}
-            onDelete={handleDelete}
-          />
+        <TreeCanvas
+  members={search || filterGender !== 'all' ? filtered : members}
+  onEdit={activeRole !== 'viewer' ? setEditMember : null}
+  onDelete={activeRole !== 'viewer' ? handleDelete : null}
+/>
         ) : (
           <ListView
             members={filtered}
